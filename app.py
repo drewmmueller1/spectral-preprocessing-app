@@ -10,7 +10,7 @@ st.title("Spectral Data Preprocessing App")
 st.markdown("""
 This app processes uploaded CSV files containing spectral data.  
 **Required Format:**  
-- Column-wise data: First column is wavenumbers (numeric).  
+- Column-wise data: First column is wavenumbers/wavelength (numeric).  
 - Row 1 contains labels for data columns (sample names, e.g., "sample1_1", "sample1_2").  
 - Subsequent rows: Wavenumber values followed by intensity values for each sample.  
 Upload a CSV file below to get started.
@@ -71,15 +71,14 @@ if uploaded_file is not None:
             if std_val != 0:
                 processed_df[col] = (processed_df[col] - mean_val) / std_val
     
-    # Plot 1: All individual spectra
+    # Plot 1: All individual spectra (no legend)
     st.subheader("All Processed Spectra")
     fig1, ax1 = plt.subplots(figsize=(12, 6))
     for col in data_cols:
-        ax1.plot(processed_df[wavenumber_col], processed_df[col], label=col, alpha=0.7)
+        ax1.plot(processed_df[wavenumber_col], processed_df[col], alpha=0.7)
     ax1.set_xlabel('Wavenumber')
     ax1.set_ylabel('Processed Intensity')
     ax1.set_title('All Processed Spectra (Wavenumber >= 300)')
-    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
     st.pyplot(fig1)
     
@@ -110,15 +109,4 @@ if uploaded_file is not None:
     ax2.set_title('Averaged Processed Spectra (Wavenumber >= 300)')
     ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
-    st.pyplot(fig2)
-    
-    # Optional: Download processed data
-    csv = processed_df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="Download Processed CSV",
-        data=csv,
-        file_name='processed_spectra.csv',
-        mime='text/csv'
-    )
-else:
-    st.info("Please upload a CSV file to proceed.")
+    st.pyplot(fig2
