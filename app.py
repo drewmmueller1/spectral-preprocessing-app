@@ -109,4 +109,4 @@ if uploaded_file is not None:
     ax2.set_title('Averaged Processed Spectra (Wavenumber >= 300)')
     ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
-    st.pyplot(fig2
+    st.pyplot(fig2)
