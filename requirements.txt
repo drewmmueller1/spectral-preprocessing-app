@@ -1,5 +1,5 @@
-echo streamlit > requirements.txt
-echo pandas >> requirements.txt
-echo matplotlib >> requirements.txt
-echo scipy >> requirements.txt
-echo numpy >> requirements.txt
+streamlit
+pandas
+matplotlib
+scipy
+numpy
