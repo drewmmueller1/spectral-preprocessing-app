@@ -47,11 +47,17 @@ if uploaded_file is not None:
     
     st.success(f"Loaded {len(data_cols)} samples. Wavenumbers filtered to >= 300.")
     
-    # Checkboxes for preprocessing steps
-    st.subheader("Select Preprocessing Steps")
-    do_normalize = st.checkbox("Normalize (scale by max)", value=False)
-    do_smooth = st.checkbox("Smooth (Savitzky-Golay filter)", value=False)
-    do_snv = st.checkbox("SNV Standardization", value=False)
+    # Preprocessing options in sidebar
+    st.sidebar.subheader("Preprocessing Options")
+    do_normalize = st.sidebar.checkbox("Normalize (scale by max)", value=False)
+    do_smooth = st.sidebar.checkbox("Smooth (Savitzky-Golay filter)", value=False)
+    if do_smooth:
+        window_length = st.sidebar.slider("SG Window Length (odd number recommended)", min_value=3, max_value=101, value=15, step=2)
+        polyorder = st.sidebar.slider("SG Polyorder", min_value=1, max_value=5, value=1)
+        deriv = st.sidebar.slider("SG Derivative Order", min_value=0, max_value=3, value=0)
+        if polyorder >= window_length:
+            st.sidebar.warning("Polyorder should be less than window length for best results.")
+    do_snv = st.sidebar.checkbox("SNV Standardization", value=False)
     
     # Apply preprocessing based on selections
     processed_df = df.copy()
@@ -64,9 +70,9 @@ if uploaded_file is not None:
                 processed_df[col] = processed_df[col] / max_val
     
     if do_smooth:
-        st.info("Applying smoothing...")
+        st.info("Applying smoothing/derivative...")
         for col in data_cols:
-            processed_df[col] = savgol_filter(processed_df[col], window_length=15, polyorder=1)
+            processed_df[col] = savgol_filter(processed_df[col], window_length=window_length, polyorder=polyorder, deriv=deriv)
     
     if do_snv:
         st.info("Applying SNV...")
