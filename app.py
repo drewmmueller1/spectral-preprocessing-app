@@ -275,7 +275,7 @@ if uploaded_file is not None:
             for nc in range(1, min(max_ncomp, n_int_vars, num_unique_y - 1) + 1):
                 rmse_cv = []
                 for train_idx, test_idx in kf.split(X_int):
-                    X_train, X_test = X_int[train_idx], X_test[test_idx]
+                    X_train, X_test = X_int[train_idx], X_int[test_idx]
                     y_train, y_test = y[train_idx], y[test_idx]
                     pls = PLSRegression(n_components=nc)
                     pls.fit(X_train, y_train)
@@ -311,6 +311,7 @@ if uploaded_file is not None:
         global_rmse = best_rmse_global
         
         # iPLS Plot: First iteration intervals
+        st.subheader("iPLS Interval Selection Plot")
         fig_ipls, ax = plt.subplots(figsize=(12, 6))
         
         max_rmse_single = max([r for r in single_rmse if r != np.inf])
@@ -340,16 +341,19 @@ if uploaded_file is not None:
         # Twin axis for spectra
         ax2 = ax.twinx()
         ax2.set_ylabel('Processed Intensity')
-        for prefix, avg in averages_full.items():
-            ax2.plot(full_x, avg, color='red', alpha=0.7, linewidth=1)
+        prefixes = list(averages_full.keys())
+        colors = plt.cm.tab10(np.linspace(0, 1, len(prefixes)))
+        for i, prefix in enumerate(averages_full):
+            ax2.plot(full_x, averages_full[prefix], color=colors[i], alpha=0.7, linewidth=1, label=prefix)
+        ax2.legend(loc='lower right')
         
         plt.title('iPLS Interval Selection (First Iteration)')
         plt.tight_layout()
-        ipls_fig = fig_ipls
+        st.pyplot(fig_ipls)
         
         # RMSE vs Iterations plot
-        st.subheader("iPLS RMSECV vs Iterations")
         if rmse_history:
+            st.subheader("iPLS RMSECV vs Iterations")
             fig_rmse, ax_rmse = plt.subplots(figsize=(8, 5))
             iters = range(1, len(rmse_history) + 1)
             ax_rmse.plot(iters, rmse_history, 'bo-', label='Selected Model')
@@ -387,34 +391,30 @@ if uploaded_file is not None:
         avg_col = processed_df[cols].mean(axis=1)
         averages[prefix] = avg_col
    
-    # Plot 1: All individual spectra (no legend)
-    if not do_ipls:
-        st.subheader("All Processed Spectra")
-        fig1, ax1 = plt.subplots(figsize=(12, 6))
-        for col in data_cols:
-            ax1.plot(processed_df[spectral_col], processed_df[col], alpha=0.7)
-        ax1.set_xlabel('Spectral Axis')
-        ax1.set_ylabel('Processed Intensity')
-        title1 = 'All Processed Spectra' if spectrum_type == "No Filtering" else f'All Processed Spectra ({spectrum_type})'
-        ax1.set_title(title1)
-        plt.tight_layout()
-        st.pyplot(fig1)
+    # Plot 1: All individual spectra
+    st.subheader("All Processed Spectra")
+    fig1, ax1 = plt.subplots(figsize=(12, 6))
+    for col in data_cols:
+        ax1.plot(processed_df[spectral_col], processed_df[col], alpha=0.7)
+    ax1.set_xlabel('Spectral Axis')
+    ax1.set_ylabel('Processed Intensity')
+    title1 = 'All Processed Spectra' if spectrum_type == "No Filtering" else f'All Processed Spectra ({spectrum_type})'
+    ax1.set_title(title1)
+    plt.tight_layout()
+    st.pyplot(fig1)
    
     # Plot 2: Averaged spectra
     st.subheader("Averaged Processed Spectra")
-    if ipls_fig is not None:
-        st.pyplot(ipls_fig)
-    else:
-        fig2, ax2 = plt.subplots(figsize=(10, 6))
-        for prefix, avg in averages.items():
-            ax2.plot(processed_df[spectral_col], avg, label=f'{prefix} Average', linewidth=2)
-        ax2.set_xlabel('Spectral Axis')
-        ax2.set_ylabel('Processed Intensity')
-        title2 = 'Averaged Processed Spectra' if spectrum_type == "No Filtering" else f'Averaged Processed Spectra ({spectrum_type})'
-        ax2.set_title(title2)
-        ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
-        st.pyplot(fig2)
+    fig2, ax2 = plt.subplots(figsize=(10, 6))
+    for prefix, avg in averages.items():
+        ax2.plot(processed_df[spectral_col], avg, label=f'{prefix} Average', linewidth=2)
+    ax2.set_xlabel('Spectral Axis')
+    ax2.set_ylabel('Processed Intensity')
+    title2 = 'Averaged Processed Spectra' if spectrum_type == "No Filtering" else f'Averaged Processed Spectra ({spectrum_type})'
+    ax2.set_title(title2)
+    ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.tight_layout()
+    st.pyplot(fig2)
    
     # Button to save the pre-processed data
     csv_processed = processed_df.to_csv(index=False).encode('utf-8')
@@ -763,8 +763,9 @@ if uploaded_file is not None:
                 st.pyplot(fig_cm_kmeans)
                 
                 # Decision boundary
+                clusters_viz = best_kmeans.predict(X_viz)
                 fig_kmeans, ax_kmeans = plt.subplots(figsize=(8,6))
-                plot_decision_regions(X_viz.values, y_pred_kmeans, clf=best_kmeans, legend=2, ax=ax_kmeans)
+                plot_decision_regions(X_viz.values, clusters_viz, clf=best_kmeans, legend=2, ax=ax_kmeans)
                 ax_kmeans.set_xlabel('PC1')
                 ax_kmeans.set_ylabel('PC2')
                 ax_kmeans.set_title('KMeans Cluster Boundaries')
