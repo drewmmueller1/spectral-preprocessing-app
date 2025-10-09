@@ -427,4 +427,135 @@ if uploaded_file is not None:
             pca_scree = PCA(n_components=n_scree)
             pca_scree.fit(X_scaled)
             var_ratio = pca_scree.explained_variance_ratio_ * 100 # % variance
-            cum_var_scre
+            cum_var_scree = np.cumsum(var_ratio)
+           
+            # Create subplot: bar for %var, line for cumulative
+            fig_scree = make_subplots(specs=[[{"secondary_y": True}]])
+           
+            # Bar: % variance per PC
+            fig_scree.add_trace(
+                go.Bar(x=[f'PC{i+1}' for i in range(n_scree)], y=var_ratio,
+                       name='% Variance', marker_color='lightblue'),
+                secondary_y=False
+            )
+           
+            # Add % labels above bars
+            for i, v in enumerate(var_ratio):
+                fig_scree.add_annotation(x=f'PC{i+1}', y=v, text=f'{v:.1f}%', showarrow=False,
+                                         yshift=10, font=dict(size=10))
+           
+            # Line: Cumulative % variance
+            fig_scree.add_trace(
+                go.Scatter(x=[f'PC{i+1}' for i in range(n_scree)], y=cum_var_scree,
+                           mode='lines+markers', name='Cumulative % Variance', line=dict(color='red', dash='dash')),
+                secondary_y=True
+            )
+           
+            fig_scree.update_layout(title=f"Scree Plot (Showing {n_scree} PCs: ≥99% + 2 more)",
+                                    xaxis_title="Principal Components",
+                                    yaxis_title="% Variance Explained", yaxis2_title="Cumulative % Variance")
+            fig_scree.update_yaxes(range=[0, max(var_ratio.max(), cum_var_scree[-1]) * 1.1], secondary_y=False)
+            fig_scree.update_yaxes(range=[0, 100], secondary_y=True)
+           
+            st.plotly_chart(fig_scree, use_container_width=True)
+           
+            # Total variance info
+            st.info(f"Total variance explained by shown PCs: {cum_var_scree[-1]:.1f}% (≥99% reached at PC{n_99})")
+       
+        # 4. Factor Loadings Plot
+        if show_loadings:
+            st.subheader("Factor Loadings Plot (Top 3 PCs)")
+            # First 3 PCs
+            max_pcs = min(3, n_total_pcs)
+            var_ratios_top = var_ratios[:max_pcs]
+           
+            # Filter valid PCs (>0% var)
+            valid_indices = [i for i in range(max_pcs) if var_ratios_top[i] > 0]
+            num_valid = len(valid_indices)
+           
+            if num_valid == 0:
+                st.warning("No PCs with >0% variance.")
+            else:
+                st.info(f"Showing loadings for {num_valid} valid PCs (out of top 3)")
+               
+                # Subset loadings (use abs for magnitude)
+                loadings = pd.DataFrame(pca_full.components_[valid_indices],
+                                        columns=X_num.columns,
+                                        index=[f'PC{i+1}' for i in valid_indices])
+                loadings_abs = loadings.abs()
+               
+                if loadings_type == "Bar Graph (Discrete, e.g., GCMS)":
+                    # Vertical grouped bars (variables on x)
+                    fig_loadings = go.Figure()
+                    colors = px.colors.qualitative.Set3[:num_valid]
+                   
+                    # Sort variables by max abs loading (descending) for bars
+                    max_loadings = loadings_abs.max(axis=0)
+                    sorted_vars = max_loadings.sort_values(ascending=False).index
+                   
+                    # Width and offset for grouped bars
+                    width = 0.25
+                    for i, pc in enumerate(loadings.index):
+                        pc_data = loadings_abs.loc[pc].loc[sorted_vars]
+                        x_pos = np.arange(len(sorted_vars)) + (i - (num_valid - 1) / 2) * width
+                        fig_loadings.add_trace(go.Bar(y=pc_data.values, x=sorted_vars,
+                                                      name=pc, marker_color=colors[i], width=width,
+                                                      base=0, offsetgroup=i))
+                   
+                    fig_loadings.update_layout(barmode='group',
+                                               height=400, showlegend=True,
+                                               title="Loadings: Grouped Bar Graph (Abs Values)",
+                                               xaxis_title="Variables",
+                                               yaxis_title="Loading Magnitude")
+                    fig_loadings.update_xaxes(tickangle=45, tickfont=dict(size=9))
+                   
+                else: # Connected Scatterplot (Continuous, e.g., Spectroscopy)
+                    # Prepare for line plot: Melt to long format, preserve original variable order
+                    loadings_melt = loadings_abs.reset_index().melt(id_vars='index', var_name='Variable', value_name='Loading')
+                    loadings_melt['PC'] = loadings_melt['index'] # Use PC name as color/group
+                   
+                    # Original order for continuous (e.g., wavelengths)
+                    original_vars = X_num.columns.tolist()
+                    loadings_melt['Variable'] = pd.Categorical(loadings_melt['Variable'], categories=original_vars, ordered=True)
+                    loadings_melt = loadings_melt.sort_values(['PC', 'Variable'])
+                   
+                    # Line plot: X=Variable, Y=Loading, color=PC, connected lines per PC, no markers
+                    fig_loadings = px.line(loadings_melt, x='Variable', y='Loading', color='PC',
+                                           markers=False,
+                                           title="Loadings: Connected Line Plot (Abs Values)",
+                                           labels={'Variable': 'Factors/Variables', 'Loading': 'Loading Magnitude'})
+                    fig_loadings.update_traces(line=dict(width=2, dash='solid')) # Continuous solid lines
+                    fig_loadings.update_xaxes(tickangle=45, tickfont=dict(size=9))
+                   
+                    if len(original_vars) > 50:
+                        st.warning("Many variables (>50)—zoom/pan the plot for details in spectroscopy data.")
+               
+                st.plotly_chart(fig_loadings, use_container_width=True)
+               
+                # Show loadings table
+                st.subheader("Loadings Table (Top 3 PCs)")
+                st.dataframe(loadings)
+       
+        # Download PCA results
+        st.subheader("Download PCA Results")
+        col1, col2 = st.columns(2)
+        with col1:
+            # PC Scores (transformed data)
+            pca_save = PCA(n_components=num_save_pcs)
+            X_pca_save = pca_save.fit_transform(X_scaled)
+            df_scores = pd.DataFrame(X_pca_save, columns=[f'PC{i+1}' for i in range(num_save_pcs)])
+            df_scores['label'] = y # Use simplified labels
+            csv_scores = df_scores.to_csv(index=False)
+            st.download_button("Download PC Scores CSV", csv_scores, "pc_scores.csv", "text/csv")
+        with col2:
+            # Loadings
+            loadings_save = pd.DataFrame(pca_full.components_[:num_save_pcs],
+                                         columns=X_num.columns,
+                                         index=[f'PC{i+1}' for i in range(num_save_pcs)])
+            csv_loadings = loadings_save.to_csv(index=True)
+            st.download_button("Download Loadings CSV", csv_loadings, "pca_loadings.csv", "text/csv")
+       
+        st.info(f"Downloads include top {num_save_pcs} PCs.")
+   
+else:
+    st.info("Please upload a CSV file to proceed.")
