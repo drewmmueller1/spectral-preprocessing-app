@@ -117,6 +117,18 @@ if uploaded_file is not None:
             std_val = processed_df[col].std()
             if std_val != 0:
                 processed_df[col] = (processed_df[col] - mean_val) / std_val
+
+    # Plot all processed spectra (full, before any iPLS filtering)
+    st.subheader("All Processed Spectra")
+    fig1, ax1 = plt.subplots(figsize=(12, 6))
+    for col in data_cols:
+        ax1.plot(processed_df[spectral_col], processed_df[col], alpha=0.7)
+    ax1.set_xlabel('Spectral Axis')
+    ax1.set_ylabel('Processed Intensity')
+    title1 = 'All Processed Spectra' if spectrum_type == "No Filtering" else f'All Processed Spectra ({spectrum_type})'
+    ax1.set_title(title1)
+    plt.tight_layout()
+    st.pyplot(fig1)
     
     # iPLS 
     ipls_fig = None
@@ -124,8 +136,8 @@ if uploaded_file is not None:
         st.info("Applying iPLS Feature Selection...")
         # Prepare X and y
         labels = [col.split('_')[0] if '_' in col else col for col in data_cols]
-        le = LabelEncoder()
-        y = le.fit_transform(labels)
+        le_ipls = LabelEncoder()
+        y = le_ipls.fit_transform(labels)
         X = processed_df[data_cols].T.values  # samples x variables (wl)
         
         num_unique_y = len(np.unique(y))
@@ -391,18 +403,6 @@ if uploaded_file is not None:
         avg_col = processed_df[cols].mean(axis=1)
         averages[prefix] = avg_col
    
-    # Plot 1: All individual spectra
-    st.subheader("All Processed Spectra")
-    fig1, ax1 = plt.subplots(figsize=(12, 6))
-    for col in data_cols:
-        ax1.plot(processed_df[spectral_col], processed_df[col], alpha=0.7)
-    ax1.set_xlabel('Spectral Axis')
-    ax1.set_ylabel('Processed Intensity')
-    title1 = 'All Processed Spectra' if spectrum_type == "No Filtering" else f'All Processed Spectra ({spectrum_type})'
-    ax1.set_title(title1)
-    plt.tight_layout()
-    st.pyplot(fig1)
-   
     # Plot 2: Averaged spectra
     st.subheader("Averaged Processed Spectra")
     fig2, ax2 = plt.subplots(figsize=(10, 6))
@@ -590,11 +590,10 @@ if uploaded_file is not None:
                     max_loadings = loadings_abs.max(axis=0)
                     sorted_vars = max_loadings.sort_values(ascending=False).index
                    
-                    # Width and offset for grouped bars
+                    # Width for grouped bars
                     width = 0.25
                     for i, pc in enumerate(loadings.index):
                         pc_data = loadings_abs.loc[pc].loc[sorted_vars]
-                        x_pos = np.arange(len(sorted_vars)) + (i - (num_valid - 1) / 2) * width
                         fig_loadings.add_trace(go.Bar(y=pc_data.values, x=sorted_vars,
                                                       name=pc, marker_color=colors[i], width=width,
                                                       base=0, offsetgroup=i))
@@ -666,15 +665,18 @@ if uploaded_file is not None:
         X_pca = pca_model.fit_transform(X_scaled)
         df_pca_model = pd.DataFrame(X_pca, columns=[f'PC{i+1}' for i in range(num_save_pcs)])
         df_pca_model['label'] = y
+        le = LabelEncoder()
         y_num = le.fit_transform(y)
         df_pca_model['label_num'] = y_num
         
         # 2D for visualization
         if num_save_pcs >= 2:
             X_viz = df_pca_model[['PC1', 'PC2']]
-            y_viz = df_pca_model['label_num']
+            y_viz = df_pca_model['label_num'].values
         else:
             st.warning("Need at least 2 PCs for visualizations.")
+            X_viz = None
+            y_viz = None
         
         # Models
         if do_lda or do_knn or do_kmeans:
@@ -682,16 +684,18 @@ if uploaded_file is not None:
             
             if do_split:
                 X_train, X_test, y_train, y_test = train_test_split(df_pca_model.drop(['label', 'label_num'], axis=1), y_num, test_size=0.2, random_state=42, stratify=y_num)
-                X_train_viz, X_test_viz, y_train_viz, y_test_viz = train_test_split(X_viz, y_viz, test_size=0.2, random_state=42, stratify=y_viz)
+                if X_viz is not None:
+                    X_train_viz, X_test_viz, y_train_viz, y_test_viz = train_test_split(X_viz, y_viz, test_size=0.2, random_state=42, stratify=y_viz)
             else:
                 X_train = df_pca_model.drop(['label', 'label_num'], axis=1)
                 y_train = y_num
                 X_test = X_train
                 y_test = y_train
-                X_train_viz = X_viz
-                y_train_viz = y_viz
-                X_test_viz = X_viz
-                y_test_viz = y_viz
+                if X_viz is not None:
+                    X_train_viz = X_viz
+                    y_train_viz = y_viz
+                    X_test_viz = X_viz
+                    y_test_viz = y_viz
             
             # LDA
             if do_lda:
@@ -708,35 +712,41 @@ if uploaded_file is not None:
                 st.pyplot(fig_cm_lda)
                 
                 # Decision boundary
-                fig_lda, ax_lda = plt.subplots(figsize=(8,6))
-                plot_decision_regions(X_viz.values, y_viz, clf=lda, legend=2, ax=ax_lda)
-                ax_lda.set_xlabel('PC1')
-                ax_lda.set_ylabel('PC2')
-                ax_lda.set_title('LDA Decision Boundaries')
-                st.pyplot(fig_lda)
+                if X_viz is not None:
+                    fig_lda, ax_lda = plt.subplots(figsize=(8,6))
+                    plot_decision_regions(X_viz.values, y_viz, clf=lda, legend=2, ax=ax_lda)
+                    ax_lda.set_xlabel('PC1')
+                    ax_lda.set_ylabel('PC2')
+                    ax_lda.set_title('LDA Decision Boundaries')
+                    st.pyplot(fig_lda)
             
             # KNN
             if do_knn:
                 st.subheader("K-Nearest Neighbors")
-                param_grid_knn = {'n_neighbors': range(1, min(21, len(X_train)))}
-                knn_gs = GridSearchCV(KNeighborsClassifier(), param_grid_knn, cv=5)
-                knn_gs.fit(X_train, y_train)
-                best_knn = knn_gs.best_estimator_
-                y_pred_knn = best_knn.predict(X_test)
-                cm_knn = confusion_matrix(y_test, y_pred_knn)
-                st.write(f"Best Parameters: {knn_gs.best_params_}")
-                st.write("Confusion Matrix:")
-                fig_cm_knn, ax_cm_knn = plt.subplots(figsize=(6,4))
-                sns.heatmap(cm_knn, annot=True, fmt='d', ax=ax_cm_knn)
-                st.pyplot(fig_cm_knn)
-                
-                # Decision boundary
-                fig_knn, ax_knn = plt.subplots(figsize=(8,6))
-                plot_decision_regions(X_viz.values, y_viz, clf=best_knn, legend=2, ax=ax_knn)
-                ax_knn.set_xlabel('PC1')
-                ax_knn.set_ylabel('PC2')
-                ax_knn.set_title('KNN Decision Boundaries')
-                st.pyplot(fig_knn)
+                n_neighbors_range = min(21, len(X_train))
+                if n_neighbors_range < 2:
+                    st.warning("Insufficient samples for KNN grid search.")
+                else:
+                    param_grid_knn = {'n_neighbors': range(1, n_neighbors_range)}
+                    knn_gs = GridSearchCV(KNeighborsClassifier(), param_grid_knn, cv=5)
+                    knn_gs.fit(X_train, y_train)
+                    best_knn = knn_gs.best_estimator_
+                    y_pred_knn = best_knn.predict(X_test)
+                    cm_knn = confusion_matrix(y_test, y_pred_knn)
+                    st.write(f"Best Parameters: {knn_gs.best_params_}")
+                    st.write("Confusion Matrix:")
+                    fig_cm_knn, ax_cm_knn = plt.subplots(figsize=(6,4))
+                    sns.heatmap(cm_knn, annot=True, fmt='d', ax=ax_cm_knn)
+                    st.pyplot(fig_cm_knn)
+                    
+                    # Decision boundary
+                    if X_viz is not None:
+                        fig_knn, ax_knn = plt.subplots(figsize=(8,6))
+                        plot_decision_regions(X_viz.values, y_viz, clf=best_knn, legend=2, ax=ax_knn)
+                        ax_knn.set_xlabel('PC1')
+                        ax_knn.set_ylabel('PC2')
+                        ax_knn.set_title('KNN Decision Boundaries')
+                        st.pyplot(fig_knn)
             
             # KMeans
             if do_kmeans:
@@ -745,7 +755,8 @@ if uploaded_file is not None:
                 best_score = -1
                 best_n_clusters = 2
                 best_kmeans = None
-                for n_cl in range(2, min(11, len(np.unique(y_num)) + 1)):
+                max_clusters = min(11, len(np.unique(y_num)) + 1)
+                for n_cl in range(2, max_clusters):
                     kmeans = KMeans(n_clusters=n_cl, random_state=42, n_init=10)
                     clusters = kmeans.fit_predict(X_train)
                     score = silhouette_score(X_train, clusters)
@@ -763,13 +774,14 @@ if uploaded_file is not None:
                 st.pyplot(fig_cm_kmeans)
                 
                 # Decision boundary
-                clusters_viz = best_kmeans.predict(X_viz)
-                fig_kmeans, ax_kmeans = plt.subplots(figsize=(8,6))
-                plot_decision_regions(X_viz.values, clusters_viz, clf=best_kmeans, legend=2, ax=ax_kmeans)
-                ax_kmeans.set_xlabel('PC1')
-                ax_kmeans.set_ylabel('PC2')
-                ax_kmeans.set_title('KMeans Cluster Boundaries')
-                st.pyplot(fig_kmeans)
+                if X_viz is not None:
+                    clusters_viz = best_kmeans.predict(X_viz)
+                    fig_kmeans, ax_kmeans = plt.subplots(figsize=(8,6))
+                    plot_decision_regions(X_viz.values, clusters_viz, clf=best_kmeans, legend=2, ax=ax_kmeans)
+                    ax_kmeans.set_xlabel('PC1')
+                    ax_kmeans.set_ylabel('PC2')
+                    ax_kmeans.set_title('KMeans Cluster Boundaries')
+                    st.pyplot(fig_kmeans)
    
 else:
     st.info("Please upload a CSV file to proceed.")
