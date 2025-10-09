@@ -2,7 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.model_selection import KFold
+from sklearn.cross_decomposition import PLSRegression
+from sklearn.metrics import mean_squared_error
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -76,6 +79,11 @@ if uploaded_file is not None:
         if polyorder >= window_length:
             st.sidebar.warning("Polyorder should be less than window length for best results.")
     do_snv = st.sidebar.checkbox("SNV Standardization", value=False)
+    do_ipls = st.sidebar.checkbox("iPLS Feature Selection (after SNV)", value=False)
+    if do_ipls:
+        n_intervals = st.sidebar.slider("Number of iPLS Intervals", 5, 50, 10)
+        pls_components = st.sidebar.slider("PLS Components for iPLS", 1, 10, 2)
+        top_intervals = st.sidebar.slider("Select top intervals", 1, 10, 3)
    
     # Apply preprocessing based on selections
     processed_df = df.copy()
@@ -108,6 +116,61 @@ if uploaded_file is not None:
             std_val = processed_df[col].std()
             if std_val != 0:
                 processed_df[col] = (processed_df[col] - mean_val) / std_val
+    
+    # iPLS after SNV
+    if do_ipls and do_snv:
+        st.info("Applying iPLS Feature Selection...")
+        # Prepare X and y
+        labels = [col.split('_')[0] if '_' in col else col for col in data_cols]
+        le = LabelEncoder()
+        y = le.fit_transform(labels)
+        X = processed_df[data_cols].T.values  # samples x variables
+        
+        # Divide into intervals
+        n_vars = X.shape[1]
+        interval_size = n_vars // n_intervals
+        intervals = []
+        for i in range(n_intervals):
+            start = i * interval_size
+            end = (i + 1) * interval_size if i < n_intervals - 1 else n_vars
+            intervals.append((start, end))
+        
+        # Compute RMSECV for each interval
+        rmse_scores = []
+        kf = KFold(n_splits=5)
+        for start, end in intervals:
+            X_int = X[:, start:end]
+            if X_int.shape[1] == 0:
+                rmse_scores.append(np.inf)
+                continue
+            pls = PLSRegression(n_components=min(pls_components, X_int.shape[1], len(np.unique(y)) - 1))
+            rmse_cv = []
+            for train_idx, test_idx in kf.split(X_int):
+                X_train, X_test = X_int[train_idx], X_int[test_idx]
+                y_train, y_test = y[train_idx], y[test_idx]
+                pls.fit(X_train, y_train)
+                y_pred = pls.predict(X_test)
+                rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+                rmse_cv.append(rmse)
+            rmse_scores.append(np.mean(rmse_cv))
+        
+        # Select top intervals
+        best_indices = np.argsort(rmse_scores)[:top_intervals]
+        selected_intervals = [intervals[i] for i in best_indices if rmse_scores[i] != np.inf]
+        
+        # Collect selected variable indices
+        selected_var_indices = []
+        for start, end in selected_intervals:
+            selected_var_indices.extend(range(start, end))
+        
+        # Filter processed_df and data_cols
+        selected_data_cols = [data_cols[j] for j in selected_var_indices]
+        processed_df = processed_df[[spectral_col] + selected_data_cols]
+        data_cols = selected_data_cols
+        
+        st.success(f"iPLS selected {len(selected_var_indices)} variables from top {len(selected_intervals)} intervals.")
+    elif do_ipls:
+        st.warning("iPLS requires SNV to be applied first.")
    
     # Plot 1: All individual spectra (no legend)
     st.subheader("All Processed Spectra")
@@ -151,25 +214,21 @@ if uploaded_file is not None:
     plt.tight_layout()
     st.pyplot(fig2)
    
-    # Stacked plot option
+    # Stacked plot option for individual samples
     st.sidebar.subheader("Plot Options")
-    do_stacked = st.sidebar.checkbox("Show Stacked Plot", value=False)
+    do_stacked = st.sidebar.checkbox("Show Stacked Individual Plots", value=False)
     
     if do_stacked:
-        st.subheader("Shifted Stacked Processed Spectra")
-        fig3, ax3 = plt.subplots(figsize=(12, 8))
-        x_range = processed_df[spectral_col].max() - processed_df[spectral_col].min()
-        shift_step = x_range * 0.1  # Arbitrary shift of 10% of range between each
-        current_shift = 0
-        for i, (prefix, avg) in enumerate(averages.items()):
-            x_shifted = processed_df[spectral_col] + current_shift
-            ax3.plot(x_shifted, avg, label=f'{prefix} Average (shifted)', linewidth=2)
-            current_shift += shift_step
-        ax3.set_xlabel('Spectral Axis (shifted)')
-        ax3.set_ylabel('Processed Intensity')
-        title3 = 'Shifted Stacked Processed Spectra' if spectrum_type == "No Filtering" else f'Shifted Stacked Processed Spectra ({spectrum_type})'
-        ax3.set_title(title3)
-        ax3.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        st.subheader("Stacked Individual Processed Spectra")
+        n_samples = len(data_cols)
+        fig3, axs = plt.subplots(n_samples, 1, figsize=(10, 3 * n_samples), sharex=True)
+        if n_samples == 1:
+            axs = [axs]
+        for i, col in enumerate(data_cols):
+            axs[i].plot(processed_df[spectral_col], processed_df[col], linewidth=1)
+            axs[i].set_ylabel('Intensity')
+            axs[i].set_title(f'Sample: {col}')
+        axs[-1].set_xlabel('Spectral Axis')
         plt.tight_layout()
         st.pyplot(fig3)
    
