@@ -447,7 +447,7 @@ if uploaded_file is not None:
             st.info(f"Total variance explained by shown PCs: {cum_var_scree[-1]:.1f}% (≥99% reached at PC{n_99})")
        
         # 4. Factor Loadings Plot
-      if show_loadings:
+        if show_loadings:
             st.subheader("Factor Loadings Plot (Top 3 PCs)")
             # First 3 PCs
             max_pcs = min(3, n_total_pcs)
