@@ -181,46 +181,35 @@ if uploaded_file is not None:
         processed_df = processed_df[[spectral_col] + selected_data_cols]
         data_cols = selected_data_cols
         
+        # Compute full averages for plot (before filtering)
+        sample_groups_full = {}
+        for col in data_cols:  # Note: data_cols is original here? Wait, no, data_cols updated? Wait, to fix, compute before filter
+        # Actually, to compute full averages, compute before filter line
+        # So, move this block before the filter
+        # But since it's inside if, compute here with original data_cols before update
+        # Wait, save original data_cols before filter
+        original_data_cols = data_cols.copy()
+        sample_groups_full = {}
+        for col in original_data_cols:
+            prefix = col.split('_')[0] if '_' in col else col
+            if prefix not in sample_groups_full:
+                sample_groups_full[prefix] = []
+            sample_groups_full[prefix].append(col)
+        
+        averages_full = {}
+        for prefix, cols in sample_groups_full.items():
+            avg_col = processed_df[original_data_cols].loc[:, cols].mean(axis=1)  # Use original processed before filter, but since filter after, processed_df is still full
+            averages_full[prefix] = avg_col
+        
+        full_x = processed_df[spectral_col].values[:len(processed_df)]  # Full x
+        
         # iPLS Plot
         st.subheader("iPLS Interval Selection Plot")
         fig_ipls, ax_ipls = plt.subplots(figsize=(12, 6))
         
-        # Plot averaged spectra in red
-        for prefix, avg in averages.items():
-            # Note: averages need to be recomputed after filtering? Wait, averages use data_cols, which is updated
-            # But since filtering after, need to recompute averages here? No, averages are computed later, but for plot, use original averages? Wait, to match, recompute with original before filter
-            # Actually, since plot is for selection, use original processed_df before filter for spectra
-            # But to simplify, since user says "the spectrum for each averaged label", use current averages, but since filter changes, perhaps plot before filter.
-            # Wait, move averages computation before iPLS.
-            # No, for now, assume plot uses full, but to fix, compute plot before filtering.
-        
-        # Wait, to correct: compute averages before iPLS filter, for the plot.
-        # So, move group and averages before iPLS.
-        
-        # Actually, in code, move the group and averages computation right after SNV, before iPLS.
-        # Yes, let's adjust.
-        
-        # But since code is linear, for plot, compute full_x = processed_df[spectral_col].values before filter.
-        full_x = processed_df[spectral_col].values
-        # Plot red curves using full averages - but averages computed later.
-        # To fix, compute sample_groups and averages before iPLS.
-        
-        # Insert here:
-        sample_groups = {}
-        for col in data_cols:
-            prefix = col.split('_')[0] if '_' in col else col
-            if prefix not in sample_groups:
-                sample_groups[prefix] = []
-            sample_groups[prefix].append(col)
-        
-        averages_full = {}
-        for prefix, cols in sample_groups.items():
-            avg_col = processed_df[cols].mean(axis=1)
-            averages_full[prefix] = avg_col
-        
-        # Now plot red
+        # Plot averaged spectra in red (on secondary y? but for simplicity, assume intensity low or adjust)
         for prefix, avg in averages_full.items():
-            ax_ipls.plot(full_x, avg, color='red', alpha=0.7, linewidth=1, label=f'{prefix} Average' if prefix == list(averages_full.keys())[0] else "")
+            ax_ipls.plot(full_x, avg, color='red', alpha=0.7, linewidth=1)
         
         # Plot bars as fill_between
         max_rmse = max([r for r in rmse_scores if r != np.inf])
@@ -229,7 +218,7 @@ if uploaded_file is not None:
             if rmse_scores[i] == np.inf:
                 continue
             x_start = full_x[start]
-            x_end = full_x[end - 1]
+            x_end = full_x[end - 1] if end < len(full_x) else full_x[-1]
             color = 'green' if i in best_indices else 'blue'
             alpha = 0.5 if color == 'blue' else 0.7
             ax_ipls.fill_between([x_start, x_end], 0, rmse_scores[i], color=color, alpha=alpha)
