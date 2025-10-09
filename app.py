@@ -670,17 +670,21 @@ if uploaded_file is not None:
         df_pca_model['label_num'] = y_num
         
         # 2D for visualization
+        X_viz = None
+        y_viz = None
         if num_save_pcs >= 2:
             X_viz = df_pca_model[['PC1', 'PC2']]
             y_viz = df_pca_model['label_num'].values
         else:
             st.warning("Need at least 2 PCs for visualizations.")
-            X_viz = None
-            y_viz = None
         
         # Models
         if do_lda or do_knn or do_kmeans:
             st.subheader("Model Analyses")
+            X_train_viz = None
+            y_train_viz = None
+            X_test_viz = None
+            y_test_viz = None
             
             if do_split:
                 X_train, X_test, y_train, y_test = train_test_split(df_pca_model.drop(['label', 'label_num'], axis=1), y_num, test_size=0.2, random_state=42, stratify=y_num)
@@ -713,8 +717,14 @@ if uploaded_file is not None:
                 
                 # Decision boundary
                 if X_viz is not None:
+                    if do_split:
+                        X_plot_viz = X_train_viz
+                        y_plot = y_train_viz
+                    else:
+                        X_plot_viz = X_viz
+                        y_plot = y_viz
                     fig_lda, ax_lda = plt.subplots(figsize=(8,6))
-                    plot_decision_regions(X_viz.values, y_viz, clf=lda, legend=2, ax=ax_lda)
+                    plot_decision_regions(X_plot_viz.values, y_plot, clf=lda, legend=2, ax=ax_lda)
                     ax_lda.set_xlabel('PC1')
                     ax_lda.set_ylabel('PC2')
                     ax_lda.set_title('LDA Decision Boundaries')
@@ -741,8 +751,14 @@ if uploaded_file is not None:
                     
                     # Decision boundary
                     if X_viz is not None:
+                        if do_split:
+                            X_plot_viz = X_train_viz
+                            y_plot = y_train_viz
+                        else:
+                            X_plot_viz = X_viz
+                            y_plot = y_viz
                         fig_knn, ax_knn = plt.subplots(figsize=(8,6))
-                        plot_decision_regions(X_viz.values, y_viz, clf=best_knn, legend=2, ax=ax_knn)
+                        plot_decision_regions(X_plot_viz.values, y_plot, clf=best_knn, legend=2, ax=ax_knn)
                         ax_knn.set_xlabel('PC1')
                         ax_knn.set_ylabel('PC2')
                         ax_knn.set_title('KNN Decision Boundaries')
@@ -775,9 +791,14 @@ if uploaded_file is not None:
                 
                 # Decision boundary
                 if X_viz is not None:
-                    clusters_viz = best_kmeans.predict(X_viz)
+                    if do_split:
+                        X_plot_viz = X_train_viz
+                        clusters_viz = best_kmeans.predict(X_train_viz)
+                    else:
+                        X_plot_viz = X_viz
+                        clusters_viz = best_kmeans.predict(X_viz)
                     fig_kmeans, ax_kmeans = plt.subplots(figsize=(8,6))
-                    plot_decision_regions(X_viz.values, clusters_viz, clf=best_kmeans, legend=2, ax=ax_kmeans)
+                    plot_decision_regions(X_plot_viz.values, clusters_viz, clf=best_kmeans, legend=2, ax=ax_kmeans)
                     ax_kmeans.set_xlabel('PC1')
                     ax_kmeans.set_ylabel('PC2')
                     ax_kmeans.set_title('KMeans Cluster Boundaries')
