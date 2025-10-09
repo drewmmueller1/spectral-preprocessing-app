@@ -275,7 +275,7 @@ if uploaded_file is not None:
             for nc in range(1, min(max_ncomp, n_int_vars, num_unique_y - 1) + 1):
                 rmse_cv = []
                 for train_idx, test_idx in kf.split(X_int):
-                    X_train, X_test = X_int[train_idx], X_int[test_idx]
+                    X_train, X_test = X_int[train_idx], X_test[test_idx]
                     y_train, y_test = y[train_idx], y[test_idx]
                     pls = PLSRegression(n_components=nc)
                     pls.fit(X_train, y_train)
@@ -322,7 +322,7 @@ if uploaded_file is not None:
                 continue
             x_start = full_x[start]
             x_end = full_x[end - 1] if end < len(full_x) else full_x[-1]
-            color = 'green' if i in selected_int_indices else 'blue'
+            color = 'green' if i in selected_int_indices else 'red'
             alpha = 0.7 if color == 'green' else 0.5
             ax.fill_between([x_start, x_end], 0, single_rmse[i], color=color, alpha=alpha)
             mid_x = (x_start + x_end) / 2
@@ -334,8 +334,8 @@ if uploaded_file is not None:
         
         # Legend for colors and line
         green_patch = Patch(facecolor='green', alpha=0.7, label='Selected Intervals')
-        blue_patch = Patch(facecolor='blue', alpha=0.5, label='Non-selected Intervals')
-        ax.legend(handles=[green_patch, blue_patch], loc='upper right')
+        red_patch = Patch(facecolor='red', alpha=0.5, label='Non-selected Intervals')
+        ax.legend(handles=[green_patch, red_patch], loc='upper right')
         
         # Twin axis for spectra
         ax2 = ax.twinx()
@@ -388,21 +388,23 @@ if uploaded_file is not None:
         averages[prefix] = avg_col
    
     # Plot 1: All individual spectra (no legend)
-    st.subheader("All Processed Spectra")
-    fig1, ax1 = plt.subplots(figsize=(12, 6))
-    for col in data_cols:
-        ax1.plot(processed_df[spectral_col], processed_df[col], alpha=0.7)
-    ax1.set_xlabel('Spectral Axis')
-    ax1.set_ylabel('Processed Intensity')
-    title1 = 'All Processed Spectra' if spectrum_type == "No Filtering" else f'All Processed Spectra ({spectrum_type})'
-    ax1.set_title(title1)
-    plt.tight_layout()
-    st.pyplot(fig1)
+    if not do_ipls:
+        st.subheader("All Processed Spectra")
+        fig1, ax1 = plt.subplots(figsize=(12, 6))
+        for col in data_cols:
+            ax1.plot(processed_df[spectral_col], processed_df[col], alpha=0.7)
+        ax1.set_xlabel('Spectral Axis')
+        ax1.set_ylabel('Processed Intensity')
+        title1 = 'All Processed Spectra' if spectrum_type == "No Filtering" else f'All Processed Spectra ({spectrum_type})'
+        ax1.set_title(title1)
+        plt.tight_layout()
+        st.pyplot(fig1)
    
     # Plot 2: Averaged spectra
     st.subheader("Averaged Processed Spectra")
     if ipls_fig is not None:
         st.pyplot(ipls_fig)
+        st.write(f"**iPLS Optimized Parameters:** n_intervals={n_intervals}, max_ncomp={max_ncomp}, selected_intervals={len(selected_intervals)}, final_RMSECV={rmse_history[-1]:.5f if rmse_history else 'N/A'}, global_RMSECV={global_rmse:.5f}")
     else:
         fig2, ax2 = plt.subplots(figsize=(10, 6))
         for prefix, avg in averages.items():
@@ -551,7 +553,7 @@ if uploaded_file is not None:
             fig_scree.update_layout(title=f"Scree Plot (Showing {n_scree} PCs: ≥99% + 2 more)",
                                     xaxis_title="Principal Components",
                                     yaxis_title="% Variance Explained")
-            fig_scree.update_yaxes(range=[0, max(var_ratio.max()) * 1.1], secondary_y=False)
+            fig_scree.update_yaxes(range=[0, var_ratio.max() * 1.1], secondary_y=False)
            
             st.plotly_chart(fig_scree, use_container_width=True)
            
