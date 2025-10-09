@@ -118,6 +118,7 @@ if uploaded_file is not None:
                 processed_df[col] = (processed_df[col] - mean_val) / std_val
     
     # iPLS after SNV
+    ipls_fig = None
     if do_ipls and do_snv:
         st.info("Applying iPLS Feature Selection...")
         # Prepare X and y
@@ -226,7 +227,7 @@ if uploaded_file is not None:
                     for nc in range(1, min(max_ncomp, n_curr_vars, num_unique_y - 1) + 1):
                         rmse_cv = []
                         for train_idx, test_idx in kf.split(X_curr):
-                            X_train, X_test = X_curr[train_idx], X_test[test_idx]
+                            X_train, X_test = X_curr[train_idx], X_curr[test_idx]
                             y_train, y_test = y[train_idx], y[test_idx]
                             pls = PLSRegression(n_components=nc)
                             pls.fit(X_train, y_train)
@@ -292,7 +293,7 @@ if uploaded_file is not None:
         for nc in range(1, min(max_ncomp, n_full_vars, num_unique_y - 1) + 1):
             rmse_cv = []
             for train_idx, test_idx in kf.split(X_full):
-                X_train, X_test = X_full[train_idx], X_test[test_idx]
+                X_train, X_test = X_full[train_idx], X_full[test_idx]
                 y_train, y_test = y[train_idx], y[test_idx]
                 pls = PLSRegression(n_components=nc)
                 pls.fit(X_train, y_train)
@@ -306,7 +307,6 @@ if uploaded_file is not None:
         global_rmse = best_rmse_global
         
         # iPLS Plot: First iteration intervals
-        st.subheader("iPLS Interval Selection Plot")
         fig_ipls, ax = plt.subplots(figsize=(12, 6))
         
         max_rmse_single = max([r for r in single_rmse if r != np.inf])
@@ -337,7 +337,7 @@ if uploaded_file is not None:
         
         plt.title('iPLS Interval Selection (First Iteration)')
         plt.tight_layout()
-        st.pyplot(fig_ipls)
+        ipls_fig = fig_ipls
         
         # RMSE vs Iterations plot
         st.subheader("iPLS RMSECV vs Iterations")
@@ -355,6 +355,7 @@ if uploaded_file is not None:
         
         # Filter to selected variables (rows)
         if current_selected_vars:
+            current_selected_vars = sorted(current_selected_vars)
             processed_df = processed_df.iloc[current_selected_vars].reset_index(drop=True)
         else:
             st.warning("No intervals selected.")
@@ -394,34 +395,19 @@ if uploaded_file is not None:
    
     # Plot 2: Averaged spectra
     st.subheader("Averaged Processed Spectra")
-    fig2, ax2 = plt.subplots(figsize=(10, 6))
-    for prefix, avg in averages.items():
-        ax2.plot(processed_df[spectral_col], avg, label=f'{prefix} Average', linewidth=2)
-    ax2.set_xlabel('Spectral Axis')
-    ax2.set_ylabel('Processed Intensity')
-    title2 = 'Averaged Processed Spectra' if spectrum_type == "No Filtering" else f'Averaged Processed Spectra ({spectrum_type})'
-    ax2.set_title(title2)
-    ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.tight_layout()
-    st.pyplot(fig2)
-   
-    # Stacked plot option for individual samples
-    st.sidebar.subheader("Plot Options")
-    do_stacked = st.sidebar.checkbox("Show Stacked Individual Plots", value=False)
-    
-    if do_stacked:
-        st.subheader("Stacked Individual Processed Spectra")
-        n_samples = len(data_cols)
-        fig3, axs = plt.subplots(n_samples, 1, figsize=(10, 3 * n_samples), sharex=True)
-        if n_samples == 1:
-            axs = [axs]
-        for i, col in enumerate(data_cols):
-            axs[i].plot(processed_df[spectral_col], processed_df[col], linewidth=1)
-            axs[i].set_ylabel('Intensity')
-            axs[i].set_title(f'Sample: {col}')
-        axs[-1].set_xlabel('Spectral Axis')
+    if ipls_fig is not None:
+        st.pyplot(ipls_fig)
+    else:
+        fig2, ax2 = plt.subplots(figsize=(10, 6))
+        for prefix, avg in averages.items():
+            ax2.plot(processed_df[spectral_col], avg, label=f'{prefix} Average', linewidth=2)
+        ax2.set_xlabel('Spectral Axis')
+        ax2.set_ylabel('Processed Intensity')
+        title2 = 'Averaged Processed Spectra' if spectrum_type == "No Filtering" else f'Averaged Processed Spectra ({spectrum_type})'
+        ax2.set_title(title2)
+        ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
-        st.pyplot(fig3)
+        st.pyplot(fig2)
    
     # Button to save the pre-processed data
     csv_processed = processed_df.to_csv(index=False).encode('utf-8')
