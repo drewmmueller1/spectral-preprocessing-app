@@ -66,8 +66,8 @@ if uploaded_file is not None:
    
     # Preprocessing options in sidebar
     st.sidebar.subheader("Preprocessing Options")
-    do_gcms_normalize = st.sidebar.checkbox("Total Sum Normalization (for GC/MS)", value=False)
     do_normalize = st.sidebar.checkbox("Normalize (scale by max)", value=False)
+    do_zscore = st.sidebar.checkbox("Z-Score Standardization", value=False)
     do_smooth = st.sidebar.checkbox("Smooth (Savitzky-Golay filter)", value=False)
     if do_smooth:
         window_length = st.sidebar.slider("SG Window Length (odd number recommended)", min_value=3, max_value=101, value=15, step=2)
@@ -80,19 +80,21 @@ if uploaded_file is not None:
     # Apply preprocessing based on selections
     processed_df = df.copy()
    
-    if do_gcms_normalize:
-        st.info("Applying Total Sum Normalization (for GC/MS)...")
-        for col in data_cols:
-            sum_val = processed_df[col].sum()
-            if sum_val != 0:
-                processed_df[col] = processed_df[col] / sum_val
-   
     if do_normalize:
         st.info("Applying normalization...")
         for col in data_cols:
             max_val = processed_df[col].max()
             if max_val != 0:
                 processed_df[col] = processed_df[col] / max_val
+   
+    if do_zscore:
+        st.info("Applying Z-Score Standardization...")
+        for row_idx in range(len(processed_df)):
+            intensities = processed_df.iloc[row_idx, 1:].values  # data_cols
+            mean_val = np.mean(intensities)
+            std_val = np.std(intensities)
+            if std_val != 0:
+                processed_df.iloc[row_idx, 1:] = (intensities - mean_val) / std_val
    
     if do_smooth:
         st.info("Applying smoothing/derivative...")
@@ -154,13 +156,18 @@ if uploaded_file is not None:
     do_stacked = st.sidebar.checkbox("Show Stacked Plot", value=False)
     
     if do_stacked:
-        st.subheader("Stacked Processed Spectra")
-        fig3, ax3 = plt.subplots(figsize=(10, 6))
-        y_data = [averages[prefix] for prefix in sample_groups.keys()]
-        ax3.stackplot(processed_df[spectral_col], *[y.values for y in y_data], labels=list(sample_groups.keys()))
-        ax3.set_xlabel('Spectral Axis')
+        st.subheader("Shifted Stacked Processed Spectra")
+        fig3, ax3 = plt.subplots(figsize=(12, 8))
+        x_range = processed_df[spectral_col].max() - processed_df[spectral_col].min()
+        shift_step = x_range * 0.1  # Arbitrary shift of 10% of range between each
+        current_shift = 0
+        for i, (prefix, avg) in enumerate(averages.items()):
+            x_shifted = processed_df[spectral_col] + current_shift
+            ax3.plot(x_shifted, avg, label=f'{prefix} Average (shifted)', linewidth=2)
+            current_shift += shift_step
+        ax3.set_xlabel('Spectral Axis (shifted)')
         ax3.set_ylabel('Processed Intensity')
-        title3 = 'Stacked Processed Spectra' if spectrum_type == "No Filtering" else f'Stacked Processed Spectra ({spectrum_type})'
+        title3 = 'Shifted Stacked Processed Spectra' if spectrum_type == "No Filtering" else f'Shifted Stacked Processed Spectra ({spectrum_type})'
         ax3.set_title(title3)
         ax3.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
@@ -330,88 +337,3 @@ if uploaded_file is not None:
             num_valid = len(valid_indices)
            
             if num_valid == 0:
-                st.warning("No PCs with >0% variance.")
-            else:
-                st.info(f"Showing loadings for {num_valid} valid PCs (out of top 3)")
-               
-                # Subset loadings (use abs for magnitude)
-                loadings = pd.DataFrame(pca_full.components_[valid_indices],
-                                        columns=X_num.columns,
-                                        index=[f'PC{i+1}' for i in valid_indices])
-                loadings_abs = loadings.abs()
-               
-                if loadings_type == "Bar Graph (Discrete, e.g., GCMS)":
-                    # Vertical grouped bars (variables on x)
-                    fig_loadings = go.Figure()
-                    colors = px.colors.qualitative.Set3[:num_valid]
-                   
-                    # Sort variables by max abs loading (descending) for bars
-                    max_loadings = loadings_abs.max(axis=0)
-                    sorted_vars = max_loadings.sort_values(ascending=False).index
-                   
-                    # Width and offset for grouped bars
-                    width = 0.25
-                    for i, pc in enumerate(loadings.index):
-                        pc_data = loadings_abs.loc[pc].loc[sorted_vars]
-                        x_pos = np.arange(len(sorted_vars)) + (i - (num_valid - 1) / 2) * width
-                        fig_loadings.add_trace(go.Bar(y=pc_data.values, x=sorted_vars,
-                                                      name=pc, marker_color=colors[i], width=width,
-                                                      base=0, offsetgroup=i))
-                   
-                    fig_loadings.update_layout(barmode='group',
-                                               height=400, showlegend=True,
-                                               title="Loadings: Grouped Bar Graph (Abs Values)",
-                                               xaxis_title="Variables",
-                                               yaxis_title="Loading Magnitude")
-                    fig_loadings.update_xaxes(tickangle=45, tickfont=dict(size=9))
-                   
-                else: # Connected Scatterplot (Continuous, e.g., Spectroscopy)
-                    # Prepare for line plot: Melt to long format, preserve original variable order
-                    loadings_melt = loadings_abs.reset_index().melt(id_vars='index', var_name='Variable', value_name='Loading')
-                    loadings_melt['PC'] = loadings_melt['index'] # Use PC name as color/group
-                   
-                    # Original order for continuous (e.g., wavelengths)
-                    original_vars = X_num.columns.tolist()
-                    loadings_melt['Variable'] = pd.Categorical(loadings_melt['Variable'], categories=original_vars, ordered=True)
-                    loadings_melt = loadings_melt.sort_values(['PC', 'Variable'])
-                   
-                    # Line plot: X=Variable, Y=Loading, color=PC, connected lines per PC, no markers
-                    fig_loadings = px.line(loadings_melt, x='Variable', y='Loading', color='PC',
-                                           markers=False,
-                                           title="Loadings: Connected Line Plot (Abs Values)",
-                                           labels={'Variable': 'Factors/Variables', 'Loading': 'Loading Magnitude'})
-                    fig_loadings.update_traces(line=dict(width=2, dash='solid')) # Continuous solid lines
-                    fig_loadings.update_xaxes(tickangle=45, tickfont=dict(size=9))
-                   
-                    if len(original_vars) > 50:
-                        st.warning("Many variables (>50)—zoom/pan the plot for details in spectroscopy data.")
-               
-                st.plotly_chart(fig_loadings, use_container_width=True)
-               
-                # Show loadings table
-                st.subheader("Loadings Table (Top 3 PCs)")
-                st.dataframe(loadings)
-       
-        # Download PCA results
-        st.subheader("Download PCA Results")
-        col1, col2 = st.columns(2)
-        with col1:
-            # PC Scores (transformed data)
-            pca_save = PCA(n_components=num_save_pcs)
-            X_pca_save = pca_save.fit_transform(X_scaled)
-            df_scores = pd.DataFrame(X_pca_save, columns=[f'PC{i+1}' for i in range(num_save_pcs)])
-            df_scores['label'] = y # Use simplified labels
-            csv_scores = df_scores.to_csv(index=False)
-            st.download_button("Download PC Scores CSV", csv_scores, "pc_scores.csv", "text/csv")
-        with col2:
-            # Loadings
-            loadings_save = pd.DataFrame(pca_full.components_[:num_save_pcs],
-                                         columns=X_num.columns,
-                                         index=[f'PC{i+1}' for i in range(num_save_pcs)])
-            csv_loadings = loadings_save.to_csv(index=True)
-            st.download_button("Download Loadings CSV", csv_loadings, "pca_loadings.csv", "text/csv")
-       
-        st.info(f"Downloads include top {num_save_pcs} PCs.")
-   
-else:
-    st.info("Please upload a CSV file to proceed.")
