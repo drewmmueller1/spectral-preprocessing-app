@@ -404,7 +404,6 @@ if uploaded_file is not None:
     st.subheader("Averaged Processed Spectra")
     if ipls_fig is not None:
         st.pyplot(ipls_fig)
-        st.write(f"**iPLS Optimized Parameters:** n_intervals={n_intervals}, max_ncomp={max_ncomp}, selected_intervals={len(selected_intervals)}, final_RMSECV={rmse_history[-1]:.5f if rmse_history else 'N/A'}, global_RMSECV={global_rmse:.5f}")
     else:
         fig2, ax2 = plt.subplots(figsize=(10, 6))
         for prefix, avg in averages.items():
