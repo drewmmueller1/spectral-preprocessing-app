@@ -82,11 +82,16 @@ if uploaded_file is not None:
     do_ipls = st.sidebar.checkbox("iPLS Feature Selection (after SNV)", value=False)
     if do_ipls:
         n_intervals = st.sidebar.slider("Number of iPLS Intervals", 5, 50, 10)
-        pls_components = st.sidebar.slider("PLS Components for iPLS", 1, 10, 2)
-        top_intervals = st.sidebar.slider("Select top intervals", 1, 10, 3)
+        pls_components = st.sidebar.slider("Max PLS Components for iPLS", 1, 10, 2)
+        top_intervals = st.sidebar.slider("Max Intervals to Select", 1, 10, 3)
    
     # Apply preprocessing based on selections
     processed_df = df.copy()
+   
+    if do_smooth:
+        st.info("Applying smoothing/derivative...")
+        for col in data_cols:
+            processed_df[col] = savgol_filter(processed_df[col], window_length=window_length, polyorder=polyorder, deriv=deriv)
    
     if do_normalize:
         st.info("Applying normalization...")
@@ -104,11 +109,6 @@ if uploaded_file is not None:
             if std_val != 0:
                 processed_df.iloc[row_idx, 1:] = (intensities - mean_val) / std_val
    
-    if do_smooth:
-        st.info("Applying smoothing/derivative...")
-        for col in data_cols:
-            processed_df[col] = savgol_filter(processed_df[col], window_length=window_length, polyorder=polyorder, deriv=deriv)
-   
     if do_snv:
         st.info("Applying SNV...")
         for col in data_cols:
@@ -124,7 +124,12 @@ if uploaded_file is not None:
         labels = [col.split('_')[0] if '_' in col else col for col in data_cols]
         le = LabelEncoder()
         y = le.fit_transform(labels)
-        X = processed_df[data_cols].T.values  # samples x variables
+        X = processed_df[data_cols].T.values  # samples x variables (wl)
+        
+        num_unique_y = len(np.unique(y))
+        if num_unique_y < 2:
+            st.error("iPLS requires at least 2 unique classes in labels.")
+            st.stop()
         
         # Compute full averages for plot (before filtering)
         original_data_cols = data_cols.copy()
@@ -141,81 +146,185 @@ if uploaded_file is not None:
             averages_full[prefix] = avg_col
         
         full_x = processed_df[spectral_col].values
+        full_num_wl = len(full_x)
         
         # Divide into intervals
         n_vars = X.shape[1]
+        if n_vars == 0:
+            st.error("No variables after preprocessing.")
+            st.stop()
         interval_size = n_vars // n_intervals
         intervals = []
         for i in range(n_intervals):
             start = i * interval_size
-            end = (i + 1) * interval_size if i < n_intervals - 1 else n_vars
+            end = min((i + 1) * interval_size, n_vars)
             intervals.append((start, end))
         
-        # Compute RMSECV for each interval
-        rmse_scores = []
         kf = KFold(n_splits=5)
-        for start, end in intervals:
+        max_ncomp = pls_components
+        max_iter = top_intervals
+        
+        # Forward iPLS selection
+        selected_intervals = []
+        current_selected_vars = []
+        rmse_history = []
+        best_ncomp_history = []
+        improved = True
+        iteration = 0
+        
+        while improved and iteration < max_iter:
+            iteration += 1
+            candidates_rmse = []
+            candidates_ncomp = []
+            candidates_int_idx = []
+            
+            for i, (start, end) in enumerate(intervals):
+                if (start, end) in selected_intervals:
+                    continue
+                temp_vars = current_selected_vars + list(range(start, end))
+                if not temp_vars:
+                    continue
+                X_temp = X[:, temp_vars]
+                n_temp_vars = X_temp.shape[1]
+                
+                best_rmse_temp = np.inf
+                best_nc_temp = 1
+                for nc in range(1, min(max_ncomp, n_temp_vars, num_unique_y - 1) + 1):
+                    rmse_cv = []
+                    for train_idx, test_idx in kf.split(X_temp):
+                        X_train, X_test = X_temp[train_idx], X_temp[test_idx]
+                        y_train, y_test = y[train_idx], y[test_idx]
+                        pls = PLSRegression(n_components=nc)
+                        pls.fit(X_train, y_train)
+                        y_pred = pls.predict(X_test)
+                        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+                        rmse_cv.append(rmse)
+                    avg_rmse = np.mean(rmse_cv)
+                    if avg_rmse < best_rmse_temp:
+                        best_rmse_temp = avg_rmse
+                        best_nc_temp = nc
+                candidates_rmse.append(best_rmse_temp)
+                candidates_ncomp.append(best_nc_temp)
+                candidates_int_idx.append(i)
+            
+            if not candidates_rmse:
+                break
+            
+            best_cand = np.argmin(candidates_rmse)
+            new_rmse = candidates_rmse[best_cand]
+            
+            # For first iteration, always add
+            if iteration == 1:
+                pass
+            else:
+                # Compute current best RMSE
+                if current_selected_vars:
+                    X_curr = X[:, current_selected_vars]
+                    n_curr_vars = X_curr.shape[1]
+                    best_rmse_curr = np.inf
+                    best_nc_curr = 1
+                    for nc in range(1, min(max_ncomp, n_curr_vars, num_unique_y - 1) + 1):
+                        rmse_cv = []
+                        for train_idx, test_idx in kf.split(X_curr):
+                            X_train, X_test = X_curr[train_idx], X_test[test_idx]
+                            y_train, y_test = y[train_idx], y[test_idx]
+                            pls = PLSRegression(n_components=nc)
+                            pls.fit(X_train, y_train)
+                            y_pred = pls.predict(X_test)
+                            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+                            rmse_cv.append(rmse)
+                        avg_rmse = np.mean(rmse_cv)
+                        if avg_rmse < best_rmse_curr:
+                            best_rmse_curr = avg_rmse
+                            best_nc_curr = nc
+                    if new_rmse >= best_rmse_curr:
+                        improved = False
+                        continue
+                else:
+                    improved = False
+                    continue
+            
+            # Add the best candidate
+            add_int_idx = candidates_int_idx[best_cand]
+            add_int = intervals[add_int_idx]
+            selected_intervals.append(add_int)
+            add_vars = list(range(add_int[0], add_int[1]))
+            current_selected_vars.extend(add_vars)
+            rmse_history.append(new_rmse)
+            best_ncomp_history.append(candidates_ncomp[best_cand])
+            
+            st.info(f"Iteration {iteration}/{max_iter}: selected interval {add_int_idx + 1} (RMSECV={new_rmse:.5f}, nLV={candidates_ncomp[best_cand]})")
+        
+        # Compute single interval RMSE and ncomp for plot
+        single_rmse = []
+        single_ncomp = []
+        for i, (start, end) in enumerate(intervals):
             X_int = X[:, start:end]
-            if X_int.shape[1] == 0:
-                rmse_scores.append(np.inf)
+            n_int_vars = X_int.shape[1]
+            if n_int_vars == 0:
+                single_rmse.append(np.inf)
+                single_ncomp.append(0)
                 continue
-            pls = PLSRegression(n_components=min(pls_components, X_int.shape[1], len(np.unique(y)) - 1))
+            best_rmse_int = np.inf
+            best_nc_int = 1
+            for nc in range(1, min(max_ncomp, n_int_vars, num_unique_y - 1) + 1):
+                rmse_cv = []
+                for train_idx, test_idx in kf.split(X_int):
+                    X_train, X_test = X_int[train_idx], X_int[test_idx]
+                    y_train, y_test = y[train_idx], y[test_idx]
+                    pls = PLSRegression(n_components=nc)
+                    pls.fit(X_train, y_train)
+                    y_pred = pls.predict(X_test)
+                    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+                    rmse_cv.append(rmse)
+                avg_rmse = np.mean(rmse_cv)
+                if avg_rmse < best_rmse_int:
+                    best_rmse_int = avg_rmse
+                    best_nc_int = nc
+            single_rmse.append(best_rmse_int)
+            single_ncomp.append(best_nc_int)
+        
+        # Compute global RMSECV
+        X_full = X
+        n_full_vars = X_full.shape[1]
+        best_rmse_global = np.inf
+        best_nc_global = 1
+        for nc in range(1, min(max_ncomp, n_full_vars, num_unique_y - 1) + 1):
             rmse_cv = []
-            for train_idx, test_idx in kf.split(X_int):
-                X_train, X_test = X_int[train_idx], X_int[test_idx]
+            for train_idx, test_idx in kf.split(X_full):
+                X_train, X_test = X_full[train_idx], X_test[test_idx]
                 y_train, y_test = y[train_idx], y[test_idx]
+                pls = PLSRegression(n_components=nc)
                 pls.fit(X_train, y_train)
                 y_pred = pls.predict(X_test)
                 rmse = np.sqrt(mean_squared_error(y_test, y_pred))
                 rmse_cv.append(rmse)
-            rmse_scores.append(np.mean(rmse_cv))
+            avg_rmse = np.mean(rmse_cv)
+            if avg_rmse < best_rmse_global:
+                best_rmse_global = avg_rmse
+                best_nc_global = nc
+        global_rmse = best_rmse_global
         
-        # Compute global RMSECV
-        X_full = X
-        pls_global = PLSRegression(n_components=min(pls_components, X_full.shape[1], len(np.unique(y)) - 1))
-        rmse_cv_global = []
-        for train_idx, test_idx in kf.split(X_full):
-            X_train, X_test = X_full[train_idx], X_full[test_idx]
-            y_train, y_test = y[train_idx], y[test_idx]
-            pls_global.fit(X_train, y_train)
-            y_pred = pls_global.predict(X_test)
-            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-            rmse_cv_global.append(rmse)
-        global_rmse = np.mean(rmse_cv_global)
-        
-        # Select top intervals
-        best_indices = np.argsort(rmse_scores)[:top_intervals]
-        selected_intervals = [intervals[i] for i in best_indices if rmse_scores[i] != np.inf]
-        
-        # Collect selected variable indices
-        selected_var_indices = []
-        for start, end in selected_intervals:
-            selected_var_indices.extend(range(start, end))
-        
-        # Filter processed_df and data_cols
-        selected_data_cols = [data_cols[j] for j in selected_var_indices]
-        processed_df = processed_df[[spectral_col] + selected_data_cols]
-        data_cols = selected_data_cols
-        
-        # iPLS Plot
+        # iPLS Plot: First iteration intervals
         st.subheader("iPLS Interval Selection Plot")
         fig_ipls, ax = plt.subplots(figsize=(12, 6))
         
-        # Plot bars and dashed line on ax
-        max_rmse = max([r for r in rmse_scores if r != np.inf])
-        offset = 0.01 * max_rmse
+        max_rmse_single = max([r for r in single_rmse if r != np.inf])
+        offset = 0.01 * max_rmse_single if max_rmse_single > 0 else 1
+        selected_int_indices = [intervals.index(intv) for intv in selected_intervals]
+        
         for i, (start, end) in enumerate(intervals):
-            if rmse_scores[i] == np.inf:
+            if single_rmse[i] == np.inf:
                 continue
             x_start = full_x[start]
             x_end = full_x[end - 1] if end < len(full_x) else full_x[-1]
-            color = 'green' if i in best_indices else 'blue'
-            alpha = 0.5 if color == 'blue' else 0.7
-            ax.fill_between([x_start, x_end], 0, rmse_scores[i], color=color, alpha=alpha)
+            color = 'green' if i in selected_int_indices else 'blue'
+            alpha = 0.7 if color == 'green' else 0.5
+            ax.fill_between([x_start, x_end], 0, single_rmse[i], color=color, alpha=alpha)
             mid_x = (x_start + x_end) / 2
-            ax.text(mid_x, rmse_scores[i] + offset, str(pls_components), ha='center', va='bottom', fontsize=8)
+            ax.text(mid_x, single_rmse[i] + offset, str(single_ncomp[i]), ha='center', va='bottom', fontsize=8)
         
-        ax.axhline(global_rmse, color='black', linestyle='--', linewidth=2, label='Global RMSECV')
+        ax.axhline(global_rmse, color='black', linestyle='--', linewidth=2, label=f'Global RMSECV ({best_nc_global} LVs)')
         ax.set_xlabel(spectral_col)
         ax.set_ylabel('RMSECV')
         ax.legend(loc='upper right')
@@ -230,7 +339,27 @@ if uploaded_file is not None:
         plt.tight_layout()
         st.pyplot(fig_ipls)
         
-        st.success(f"iPLS selected {len(selected_var_indices)} variables from top {len(selected_intervals)} intervals.")
+        # RMSE vs Iterations plot
+        st.subheader("iPLS RMSECV vs Iterations")
+        if rmse_history:
+            fig_rmse, ax_rmse = plt.subplots(figsize=(8, 5))
+            iters = range(1, len(rmse_history) + 1)
+            ax_rmse.plot(iters, rmse_history, 'bo-', label='Selected Model')
+            ax_rmse.axhline(global_rmse, color='black', ls='--', label='Global Model')
+            ax_rmse.set_xlabel('Iteration')
+            ax_rmse.set_ylabel('RMSECV')
+            ax_rmse.legend()
+            ax_rmse.grid(True, alpha=0.3)
+            plt.tight_layout()
+            st.pyplot(fig_rmse)
+        
+        # Filter to selected variables (rows)
+        if current_selected_vars:
+            processed_df = processed_df.iloc[current_selected_vars].reset_index(drop=True)
+        else:
+            st.warning("No intervals selected.")
+        
+        st.success(f"iPLS selected {len(selected_intervals)} intervals ({len(current_selected_vars)} variables) from {n_intervals} possible.")
     elif do_ipls:
         st.warning("iPLS requires SNV to be applied first.")
    
