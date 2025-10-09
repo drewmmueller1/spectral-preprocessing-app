@@ -10,7 +10,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch
+
 from scipy.signal import savgol_filter
 
 # Title and instructions
@@ -79,11 +80,7 @@ if uploaded_file is not None:
         if polyorder >= window_length:
             st.sidebar.warning("Polyorder should be less than window length for best results.")
     do_snv = st.sidebar.checkbox("SNV Standardization", value=False)
-    do_ipls = st.sidebar.checkbox("iPLS Feature Selection (after SNV)", value=False)
-    if do_ipls:
-        n_intervals = st.sidebar.slider("Number of iPLS Intervals", 5, 50, 10)
-        pls_components = st.sidebar.slider("Max PLS Components for iPLS", 1, 10, 2)
-        top_intervals = st.sidebar.slider("Max Intervals to Select", 1, 10, 3)
+    do_ipls = st.sidebar.checkbox("iPLS Feature Selection", value=False)
    
     # Apply preprocessing based on selections
     processed_df = df.copy()
@@ -117,9 +114,9 @@ if uploaded_file is not None:
             if std_val != 0:
                 processed_df[col] = (processed_df[col] - mean_val) / std_val
     
-    # iPLS after SNV
+    # iPLS 
     ipls_fig = None
-    if do_ipls and do_snv:
+    if do_ipls:
         st.info("Applying iPLS Feature Selection...")
         # Prepare X and y
         labels = [col.split('_')[0] if '_' in col else col for col in data_cols]
@@ -149,11 +146,12 @@ if uploaded_file is not None:
         full_x = processed_df[spectral_col].values
         full_num_wl = len(full_x)
         
-        # Divide into intervals
+        # Automatic settings
         n_vars = X.shape[1]
         if n_vars == 0:
             st.error("No variables after preprocessing.")
             st.stop()
+        n_intervals = min(50, max(10, n_vars // 10))
         interval_size = n_vars // n_intervals
         intervals = []
         for i in range(n_intervals):
@@ -162,8 +160,8 @@ if uploaded_file is not None:
             intervals.append((start, end))
         
         kf = KFold(n_splits=5)
-        max_ncomp = pls_components
-        max_iter = top_intervals
+        max_ncomp = min(10, n_vars // 10, num_unique_y - 1)
+        max_iter = n_intervals
         
         # Forward iPLS selection
         selected_intervals = []
@@ -327,7 +325,11 @@ if uploaded_file is not None:
         ax.axhline(global_rmse, color='black', linestyle='--', linewidth=2, label=f'Global RMSECV ({best_nc_global} LVs)')
         ax.set_xlabel(spectral_col)
         ax.set_ylabel('RMSECV')
-        ax.legend(loc='upper right')
+        
+        # Legend for colors and line
+        green_patch = Patch(facecolor='green', alpha=0.7, label='Selected Intervals')
+        blue_patch = Patch(facecolor='blue', alpha=0.5, label='Non-selected Intervals')
+        ax.legend(handles=[green_patch, blue_patch], loc='upper right')
         
         # Twin axis for spectra
         ax2 = ax.twinx()
@@ -361,8 +363,6 @@ if uploaded_file is not None:
             st.warning("No intervals selected.")
         
         st.success(f"iPLS selected {len(selected_intervals)} intervals ({len(current_selected_vars)} variables) from {n_intervals} possible.")
-    elif do_ipls:
-        st.warning("iPLS requires SNV to be applied first.")
    
     # Now compute sample_groups and averages with possibly filtered data
     st.subheader("Sample Grouping for Averaging")
