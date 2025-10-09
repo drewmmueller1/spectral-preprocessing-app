@@ -3,16 +3,20 @@ import pandas as pd
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, train_test_split, GridSearchCV
 from sklearn.cross_decomposition import PLSRegression
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, confusion_matrix, silhouette_score
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.cluster import KMeans
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
-
+from mlxtend.plotting import plot_decision_regions
 from scipy.signal import savgol_filter
+import seaborn as sns
 
 # Title and instructions
 st.title("Spectral Preprocessing and PCA Visualization App")
@@ -162,6 +166,8 @@ if uploaded_file is not None:
         kf = KFold(n_splits=5)
         max_ncomp = min(10, n_vars // 10, num_unique_y - 1)
         max_iter = n_intervals
+        
+        st.sidebar.info(f"iPLS Optimized: n_intervals={n_intervals}, max_ncomp={max_ncomp}, max_iter={max_iter}")
         
         # Forward iPLS selection
         selected_intervals = []
@@ -526,10 +532,9 @@ if uploaded_file is not None:
             pca_scree = PCA(n_components=n_scree)
             pca_scree.fit(X_scaled)
             var_ratio = pca_scree.explained_variance_ratio_ * 100 # % variance
-            cum_var_scree = np.cumsum(var_ratio)
            
-            # Create subplot: bar for %var, line for cumulative
-            fig_scree = make_subplots(specs=[[{"secondary_y": True}]])
+            # Create subplot: bar for %var only
+            fig_scree = make_subplots(specs=[[{"secondary_y": False}]])
            
             # Bar: % variance per PC
             fig_scree.add_trace(
@@ -543,23 +548,15 @@ if uploaded_file is not None:
                 fig_scree.add_annotation(x=f'PC{i+1}', y=v, text=f'{v:.1f}%', showarrow=False,
                                          yshift=10, font=dict(size=10))
            
-            # Line: Cumulative % variance
-            fig_scree.add_trace(
-                go.Scatter(x=[f'PC{i+1}' for i in range(n_scree)], y=cum_var_scree,
-                           mode='lines+markers', name='Cumulative % Variance', line=dict(color='red', dash='dash')),
-                secondary_y=True
-            )
-           
             fig_scree.update_layout(title=f"Scree Plot (Showing {n_scree} PCs: ≥99% + 2 more)",
                                     xaxis_title="Principal Components",
-                                    yaxis_title="% Variance Explained", yaxis2_title="Cumulative % Variance")
-            fig_scree.update_yaxes(range=[0, max(var_ratio.max(), cum_var_scree[-1]) * 1.1], secondary_y=False)
-            fig_scree.update_yaxes(range=[0, 100], secondary_y=True)
+                                    yaxis_title="% Variance Explained")
+            fig_scree.update_yaxes(range=[0, max(var_ratio.max()) * 1.1], secondary_y=False)
            
             st.plotly_chart(fig_scree, use_container_width=True)
            
             # Total variance info
-            st.info(f"Total variance explained by shown PCs: {cum_var_scree[-1]:.1f}% (≥99% reached at PC{n_99})")
+            st.info(f"Total variance explained by shown PCs: {cum_var[n_scree-1]:.1f}% (≥99% reached at PC{n_99})")
        
         # 4. Factor Loadings Plot
         if show_loadings:
@@ -655,6 +652,122 @@ if uploaded_file is not None:
             st.download_button("Download Loadings CSV", csv_loadings, "pca_loadings.csv", "text/csv")
        
         st.info(f"Downloads include top {num_save_pcs} PCs.")
+        
+        # Clustering/Classification Options
+        st.sidebar.subheader("Model Options")
+        do_lda = st.sidebar.checkbox("Linear Discriminant Analysis", value=False)
+        do_knn = st.sidebar.checkbox("K-Nearest Neighbors", value=False)
+        do_kmeans = st.sidebar.checkbox("K-Means Clustering", value=False)
+        do_split = st.sidebar.checkbox("Split into train/test (20% test)", value=False)
+        
+        # Prepare PC data for models
+        pca_model = PCA(n_components=num_save_pcs)
+        X_pca = pca_model.fit_transform(X_scaled)
+        df_pca_model = pd.DataFrame(X_pca, columns=[f'PC{i+1}' for i in range(num_save_pcs)])
+        df_pca_model['label'] = y
+        y_num = le.fit_transform(y)
+        df_pca_model['label_num'] = y_num
+        
+        # 2D for visualization
+        if num_save_pcs >= 2:
+            X_viz = df_pca_model[['PC1', 'PC2']]
+            y_viz = df_pca_model['label_num']
+        else:
+            st.warning("Need at least 2 PCs for visualizations.")
+        
+        # Models
+        if do_lda or do_knn or do_kmeans:
+            st.subheader("Model Analyses")
+            
+            if do_split:
+                X_train, X_test, y_train, y_test = train_test_split(df_pca_model.drop(['label', 'label_num'], axis=1), y_num, test_size=0.2, random_state=42, stratify=y_num)
+                X_train_viz, X_test_viz, y_train_viz, y_test_viz = train_test_split(X_viz, y_viz, test_size=0.2, random_state=42, stratify=y_viz)
+            else:
+                X_train = df_pca_model.drop(['label', 'label_num'], axis=1)
+                y_train = y_num
+                X_test = X_train
+                y_test = y_train
+                X_train_viz = X_viz
+                y_train_viz = y_viz
+                X_test_viz = X_viz
+                y_test_viz = y_viz
+            
+            # LDA
+            if do_lda:
+                st.subheader("Linear Discriminant Analysis")
+                # LDA has few params, use default for simplicity
+                lda = LinearDiscriminantAnalysis()
+                lda.fit(X_train, y_train)
+                y_pred_lda = lda.predict(X_test)
+                cm_lda = confusion_matrix(y_test, y_pred_lda)
+                st.write("Best Parameters: Default")
+                st.write("Confusion Matrix:")
+                fig_cm_lda, ax_cm_lda = plt.subplots(figsize=(6,4))
+                sns.heatmap(cm_lda, annot=True, fmt='d', ax=ax_cm_lda)
+                st.pyplot(fig_cm_lda)
+                
+                # Decision boundary
+                fig_lda, ax_lda = plt.subplots(figsize=(8,6))
+                plot_decision_regions(X_viz.values, y_viz, clf=lda, legend=2, ax=ax_lda)
+                ax_lda.set_xlabel('PC1')
+                ax_lda.set_ylabel('PC2')
+                ax_lda.set_title('LDA Decision Boundaries')
+                st.pyplot(fig_lda)
+            
+            # KNN
+            if do_knn:
+                st.subheader("K-Nearest Neighbors")
+                param_grid_knn = {'n_neighbors': range(1, min(21, len(X_train)))}
+                knn_gs = GridSearchCV(KNeighborsClassifier(), param_grid_knn, cv=5)
+                knn_gs.fit(X_train, y_train)
+                best_knn = knn_gs.best_estimator_
+                y_pred_knn = best_knn.predict(X_test)
+                cm_knn = confusion_matrix(y_test, y_pred_knn)
+                st.write(f"Best Parameters: {knn_gs.best_params_}")
+                st.write("Confusion Matrix:")
+                fig_cm_knn, ax_cm_knn = plt.subplots(figsize=(6,4))
+                sns.heatmap(cm_knn, annot=True, fmt='d', ax=ax_cm_knn)
+                st.pyplot(fig_cm_knn)
+                
+                # Decision boundary
+                fig_knn, ax_knn = plt.subplots(figsize=(8,6))
+                plot_decision_regions(X_viz.values, y_viz, clf=best_knn, legend=2, ax=ax_knn)
+                ax_knn.set_xlabel('PC1')
+                ax_knn.set_ylabel('PC2')
+                ax_knn.set_title('KNN Decision Boundaries')
+                st.pyplot(fig_knn)
+            
+            # KMeans
+            if do_kmeans:
+                st.subheader("K-Means Clustering")
+                # Optimize n_clusters
+                best_score = -1
+                best_n_clusters = 2
+                best_kmeans = None
+                for n_cl in range(2, min(11, len(np.unique(y_num)) + 1)):
+                    kmeans = KMeans(n_clusters=n_cl, random_state=42, n_init=10)
+                    clusters = kmeans.fit_predict(X_train)
+                    score = silhouette_score(X_train, clusters)
+                    if score > best_score:
+                        best_score = score
+                        best_n_clusters = n_cl
+                        best_kmeans = kmeans
+                y_pred_kmeans = best_kmeans.predict(X_test)
+                # Confusion-like with true labels
+                cm_kmeans = confusion_matrix(y_test, y_pred_kmeans)
+                st.write(f"Best Parameters: n_clusters={best_n_clusters} (silhouette={best_score:.3f})")
+                st.write("Cluster Assignment Matrix (vs true labels):")
+                fig_cm_kmeans, ax_cm_kmeans = plt.subplots(figsize=(6,4))
+                sns.heatmap(cm_kmeans, annot=True, fmt='d', ax=ax_cm_kmeans)
+                st.pyplot(fig_cm_kmeans)
+                
+                # Decision boundary
+                fig_kmeans, ax_kmeans = plt.subplots(figsize=(8,6))
+                plot_decision_regions(X_viz.values, y_pred_kmeans, clf=best_kmeans, legend=2, ax=ax_kmeans)
+                ax_kmeans.set_xlabel('PC1')
+                ax_kmeans.set_ylabel('PC2')
+                ax_kmeans.set_title('KMeans Cluster Boundaries')
+                st.pyplot(fig_kmeans)
    
 else:
     st.info("Please upload a CSV file to proceed.")
