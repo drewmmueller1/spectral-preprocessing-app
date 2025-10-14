@@ -162,13 +162,31 @@ if uploaded_file is not None:
         full_x = processed_df[spectral_col].values
         full_num_wl = len(full_x)
         
-        # Automatic settings
+        # iPLS Parameters in sidebar
+        st.sidebar.subheader("iPLS Parameters")
+        optimize_ipls = st.sidebar.checkbox("Optimize iPLS Parameters Automatically", value=True)
+        
         n_vars = X.shape[1]
         if n_vars == 0:
             st.error("No variables after preprocessing.")
             st.stop()
-        n_intervals = min(50, max(10, n_vars // 10))
-        interval_size = n_vars // n_intervals
+            
+        if optimize_ipls:
+            # Automatic settings (as in original code)
+            n_intervals = min(50, max(10, n_vars // 10))
+            interval_size = n_vars // n_intervals
+            max_ncomp = min(10, n_vars // 10, num_unique_y - 1)
+            max_iter = n_intervals
+            st.sidebar.info(f"Automatic iPLS: n_intervals={n_intervals}, max_ncomp={max_ncomp}, max_iter={max_iter}")
+        else:
+            # Manual settings
+            n_intervals = st.sidebar.slider("Number of Intervals", min_value=5, max_value=100, value=min(50, max(10, n_vars // 10)), step=1)
+            interval_size = n_vars // n_intervals
+            max_ncomp = st.sidebar.slider("Maximum Number of Components", min_value=1, max_value=min(20, n_vars, num_unique_y - 1), value=min(10, n_vars // 10, num_unique_y - 1), step=1)
+            max_iter = st.sidebar.slider("Maximum Iterations", min_value=1, max_value=100, value=n_intervals, step=1)
+            st.sidebar.info(f"Manual iPLS: n_intervals={n_intervals}, max_ncomp={max_ncomp}, max_iter={max_iter}")
+        
+        # Generate intervals
         intervals = []
         for i in range(n_intervals):
             start = i * interval_size
@@ -176,10 +194,6 @@ if uploaded_file is not None:
             intervals.append((start, end))
         
         kf = KFold(n_splits=5)
-        max_ncomp = min(10, n_vars // 10, num_unique_y - 1)
-        max_iter = n_intervals
-        
-        st.sidebar.info(f"iPLS Optimized: n_intervals={n_intervals}, max_ncomp={max_ncomp}, max_iter={max_iter}")
         
         # Forward iPLS selection
         selected_intervals = []
