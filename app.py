@@ -154,6 +154,23 @@ if uploaded_file is not None:
     for prefix, cols in sample_groups.items():
         averages[prefix] = processed_df[cols].mean(axis=1).copy()
     
+    # Display sample grouping
+    st.subheader("Sample Grouping for Averaging")
+    st.write("Detected groups:", list(sample_groups.keys()))
+   
+    # Plot 2: Averaged spectra using pre-iPLS data
+    st.subheader("Averaged Processed Spectra")
+    fig2, ax2 = plt.subplots(figsize=(10, 6))
+    for prefix, avg in averages.items():
+        ax2.plot(full_spectral, avg, label=f'{prefix} Average', linewidth=2)
+    ax2.set_xlabel(x_label)
+    ax2.set_ylabel(y_label)
+    title2 = 'Averaged Processed Spectra' if spectrum_type == "No Filtering" else f'Averaged Processed Spectra ({spectrum_type})'
+    ax2.set_title(title2)
+    ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.tight_layout()
+    st.pyplot(fig2)
+    
     # iPLS 
     ipls_fig = None
     if do_ipls:
@@ -175,27 +192,16 @@ if uploaded_file is not None:
         
         # iPLS Parameters in sidebar
         st.sidebar.subheader("iPLS Parameters")
-        optimize_ipls = st.sidebar.checkbox("Optimize iPLS Parameters Automatically", value=True)
-        
         n_vars = X.shape[1]
         if n_vars == 0:
             st.error("No variables after preprocessing.")
             st.stop()
-            
-        if optimize_ipls:
-            # Automatic settings
-            n_intervals = min(50, max(10, n_vars // 10))
-            interval_size = n_vars // n_intervals
-            max_ncomp = min(10, n_vars // 10, num_unique_y - 1)
-            max_iter = n_intervals
-            st.sidebar.info(f"Automatic iPLS: n_intervals={n_intervals}, max_ncomp={max_ncomp}, max_iter={max_iter}")
-        else:
-            # Manual settings
-            n_intervals = st.sidebar.slider("Number of Intervals", min_value=5, max_value=100, value=min(50, max(10, n_vars // 10)), step=1)
-            interval_size = n_vars // n_intervals
-            max_ncomp = st.sidebar.slider("Maximum Number of Components", min_value=1, max_value=min(20, n_vars, num_unique_y - 1), value=min(10, n_vars // 10, num_unique_y - 1), step=1)
-            max_iter = st.sidebar.slider("Maximum Iterations", min_value=1, max_value=100, value=n_intervals, step=1)
-            st.sidebar.info(f"Manual iPLS: n_intervals={n_intervals}, max_ncomp={max_ncomp}, max_iter={max_iter}")
+        
+        n_intervals = st.sidebar.slider("Number of Intervals", min_value=5, max_value=100, value=min(50, max(10, n_vars // 10)), step=1)
+        interval_size = n_vars // n_intervals
+        max_ncomp = st.sidebar.slider("Maximum Number of Components", min_value=1, max_value=min(20, n_vars, num_unique_y - 1), value=min(10, n_vars // 10, num_unique_y - 1), step=1)
+        max_iter = st.sidebar.slider("Maximum Iterations", min_value=1, max_value=100, value=n_intervals, step=1)
+        st.sidebar.info(f"iPLS Parameters: n_intervals={n_intervals}, max_ncomp={max_ncomp}, max_iter={max_iter}")
         
         # Generate intervals
         intervals = []
@@ -312,7 +318,7 @@ if uploaded_file is not None:
             for nc in range(1, min(max_ncomp, n_int_vars, num_unique_y - 1) + 1):
                 rmse_cv = []
                 for train_idx, test_idx in kf.split(X_int):
-                    X_train, X_test = X_int[train_idx], X_int[test_idx]
+                    X_train, X_test = X_int[train_idx], X_test[test_idx]
                     y_train, y_test = y[train_idx], y[test_idx]
                     pls = PLSRegression(n_components=nc)
                     pls.fit(X_train, y_train)
@@ -410,23 +416,6 @@ if uploaded_file is not None:
             st.warning("No intervals selected.")
         
         st.success(f"iPLS selected {len(selected_intervals)} intervals ({len(current_selected_vars)} variables) from {n_intervals} possible.")
-   
-    # Display sample grouping and averaged spectra using pre-iPLS data
-    st.subheader("Sample Grouping for Averaging")
-    st.write("Detected groups:", list(sample_groups.keys()))
-   
-    # Plot 2: Averaged spectra using pre-iPLS data
-    st.subheader("Averaged Processed Spectra")
-    fig2, ax2 = plt.subplots(figsize=(10, 6))
-    for prefix, avg in averages.items():
-        ax2.plot(full_spectral, avg, label=f'{prefix} Average', linewidth=2)
-    ax2.set_xlabel(x_label)
-    ax2.set_ylabel(y_label)
-    title2 = 'Averaged Processed Spectra' if spectrum_type == "No Filtering" else f'Averaged Processed Spectra ({spectrum_type})'
-    ax2.set_title(title2)
-    ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.tight_layout()
-    st.pyplot(fig2)
    
     # Button to save the pre-processed data (post-iPLS if applied)
     csv_processed = processed_df.to_csv(index=False).encode('utf-8')
