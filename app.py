@@ -268,7 +268,7 @@ if uploaded_file is not None:
                     for nc in range(1, min(max_ncomp, n_curr_vars, num_unique_y - 1) + 1):
                         rmse_cv = []
                         for train_idx, test_idx in kf.split(X_curr):
-                            X_train, X_test = X_curr[train_idx], X_test[test_idx]
+                            X_train, X_test = X_curr[train_idx], X_curr[test_idx]  # Fixed line
                             y_train, y_test = y[train_idx], y[test_idx]
                             pls = PLSRegression(n_components=nc)
                             pls.fit(X_train, y_train)
