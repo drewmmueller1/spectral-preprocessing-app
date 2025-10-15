@@ -141,6 +141,19 @@ if uploaded_file is not None:
     plt.tight_layout()
     st.pyplot(fig1)
     
+    # Compute full spectral axis, sample groups, and averages before iPLS
+    full_spectral = processed_df[spectral_col].copy()
+    sample_groups = {}
+    for col in data_cols:
+        prefix = col.split('_')[0] if '_' in col else col
+        if prefix not in sample_groups:
+            sample_groups[prefix] = []
+        sample_groups[prefix].append(col)
+   
+    averages = {}
+    for prefix, cols in sample_groups.items():
+        averages[prefix] = processed_df[cols].mean(axis=1).copy()
+    
     # iPLS 
     ipls_fig = None
     if do_ipls:
@@ -156,22 +169,9 @@ if uploaded_file is not None:
             st.error("iPLS requires at least 2 unique classes in labels.")
             st.stop()
         
-        # Compute full averages for plot (before filtering)
-        original_data_cols = data_cols.copy()
-        sample_groups_full = {}
-        for col in original_data_cols:
-            prefix = col.split('_')[0] if '_' in col else col
-            if prefix not in sample_groups_full:
-                sample_groups_full[prefix] = []
-            sample_groups_full[prefix].append(col)
-        
-        averages_full = {}
-        for prefix, cols in sample_groups_full.items():
-            avg_col = processed_df[cols].mean(axis=1)
-            averages_full[prefix] = avg_col
-        
-        full_x = processed_df[spectral_col].values
-        full_num_wl = len(full_x)
+        # Use pre-computed averages and full_x for iPLS plot
+        averages_full = averages
+        full_x = full_spectral.values
         
         # iPLS Parameters in sidebar
         st.sidebar.subheader("iPLS Parameters")
@@ -411,28 +411,15 @@ if uploaded_file is not None:
         
         st.success(f"iPLS selected {len(selected_intervals)} intervals ({len(current_selected_vars)} variables) from {n_intervals} possible.")
    
-    # Now compute sample_groups and averages with possibly filtered data
+    # Display sample grouping and averaged spectra using pre-iPLS data
     st.subheader("Sample Grouping for Averaging")
-    sample_groups = {}
-    for col in data_cols:
-        prefix = col.split('_')[0] if '_' in col else col
-        if prefix not in sample_groups:
-            sample_groups[prefix] = []
-        sample_groups[prefix].append(col)
-   
     st.write("Detected groups:", list(sample_groups.keys()))
    
-    # Compute averages
-    averages = {}
-    for prefix, cols in sample_groups.items():
-        avg_col = processed_df[cols].mean(axis=1)
-        averages[prefix] = avg_col
-   
-    # Plot 2: Averaged spectra
+    # Plot 2: Averaged spectra using pre-iPLS data
     st.subheader("Averaged Processed Spectra")
     fig2, ax2 = plt.subplots(figsize=(10, 6))
     for prefix, avg in averages.items():
-        ax2.plot(processed_df[spectral_col], avg, label=f'{prefix} Average', linewidth=2)
+        ax2.plot(full_spectral, avg, label=f'{prefix} Average', linewidth=2)
     ax2.set_xlabel(x_label)
     ax2.set_ylabel(y_label)
     title2 = 'Averaged Processed Spectra' if spectrum_type == "No Filtering" else f'Averaged Processed Spectra ({spectrum_type})'
@@ -441,7 +428,7 @@ if uploaded_file is not None:
     plt.tight_layout()
     st.pyplot(fig2)
    
-    # Button to save the pre-processed data
+    # Button to save the pre-processed data (post-iPLS if applied)
     csv_processed = processed_df.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="Save Pre-Processed Data",
@@ -652,8 +639,6 @@ if uploaded_file is not None:
                         st.warning("Many variables (>50)—zoom/pan the plot for details in spectroscopy data.")
                
                 st.plotly_chart(fig_loadings, use_container_width=True)
-               
-                # Wait, this seems cut off, but in original it's complete.
                
                 # Show loadings table
                 st.subheader("Loadings Table (Top 3 PCs)")
