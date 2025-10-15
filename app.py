@@ -72,6 +72,17 @@ if uploaded_file is not None:
     
     st.success(f"Loaded {len(data_cols)} samples. {filter_msg}")
    
+    # Axis label customization in sidebar
+    st.sidebar.subheader("Axis Label Customization")
+    custom_x_label = st.sidebar.text_input("X-Axis Label for Spectra and iPLS Plots (leave blank for 'Spectral Axis')", "")
+    custom_y_label = st.sidebar.text_input("Y-Axis Label for Spectra and iPLS Twin Axis (leave blank for 'Processed Intensity')", "")
+    custom_loadings_x_label = st.sidebar.text_input("X-Axis Label for Factor Loadings Plot (leave blank for 'Factors/Variables')", "")
+    
+    # Set axis labels based on user input or defaults
+    x_label = custom_x_label if custom_x_label.strip() else "Spectral Axis"
+    y_label = custom_y_label if custom_y_label.strip() else "Processed Intensity"
+    loadings_x_label = custom_loadings_x_label if custom_loadings_x_label.strip() else "Factors/Variables"
+   
     # Preprocessing options in sidebar
     st.sidebar.subheader("Preprocessing Options")
     do_normalize = st.sidebar.checkbox("Normalize (scale by max)", value=False)
@@ -123,8 +134,8 @@ if uploaded_file is not None:
     fig1, ax1 = plt.subplots(figsize=(12, 6))
     for col in data_cols:
         ax1.plot(processed_df[spectral_col], processed_df[col], alpha=0.7)
-    ax1.set_xlabel('Spectral Axis')
-    ax1.set_ylabel('Processed Intensity')
+    ax1.set_xlabel(x_label)
+    ax1.set_ylabel(y_label)
     title1 = 'All Processed Spectra' if spectrum_type == "No Filtering" else f'All Processed Spectra ({spectrum_type})'
     ax1.set_title(title1)
     plt.tight_layout()
@@ -172,7 +183,7 @@ if uploaded_file is not None:
             st.stop()
             
         if optimize_ipls:
-            # Automatic settings (as in original code)
+            # Automatic settings
             n_intervals = min(50, max(10, n_vars // 10))
             interval_size = n_vars // n_intervals
             max_ncomp = min(10, n_vars // 10, num_unique_y - 1)
@@ -257,7 +268,7 @@ if uploaded_file is not None:
                     for nc in range(1, min(max_ncomp, n_curr_vars, num_unique_y - 1) + 1):
                         rmse_cv = []
                         for train_idx, test_idx in kf.split(X_curr):
-                            X_train, X_test = X_curr[train_idx], X_curr[test_idx]
+                            X_train, X_test = X_curr[train_idx], X_test[test_idx]
                             y_train, y_test = y[train_idx], y[test_idx]
                             pls = PLSRegression(n_components=nc)
                             pls.fit(X_train, y_train)
@@ -301,7 +312,7 @@ if uploaded_file is not None:
             for nc in range(1, min(max_ncomp, n_int_vars, num_unique_y - 1) + 1):
                 rmse_cv = []
                 for train_idx, test_idx in kf.split(X_int):
-                    X_train, X_test = X_int[train_idx], X_int[test_idx]
+                    X_train, X_test = X_int[train_idx], X_test[test_idx]
                     y_train, y_test = y[train_idx], y[test_idx]
                     pls = PLSRegression(n_components=nc)
                     pls.fit(X_train, y_train)
@@ -356,7 +367,7 @@ if uploaded_file is not None:
             ax.text(mid_x, single_rmse[i] + offset, str(single_ncomp[i]), ha='center', va='bottom', fontsize=8)
         
         ax.axhline(global_rmse, color='black', linestyle='--', linewidth=2, label=f'Global RMSECV ({best_nc_global} LVs)')
-        ax.set_xlabel(spectral_col)
+        ax.set_xlabel(x_label)
         ax.set_ylabel('RMSECV')
         
         # Legend for colors and line
@@ -366,7 +377,7 @@ if uploaded_file is not None:
         
         # Twin axis for spectra
         ax2 = ax.twinx()
-        ax2.set_ylabel('Processed Intensity')
+        ax2.set_ylabel(y_label)
         prefixes = list(averages_full.keys())
         colors = plt.cm.tab10(np.linspace(0, 1, len(prefixes)))
         for i, prefix in enumerate(averages_full):
@@ -422,8 +433,8 @@ if uploaded_file is not None:
     fig2, ax2 = plt.subplots(figsize=(10, 6))
     for prefix, avg in averages.items():
         ax2.plot(processed_df[spectral_col], avg, label=f'{prefix} Average', linewidth=2)
-    ax2.set_xlabel('Spectral Axis')
-    ax2.set_ylabel('Processed Intensity')
+    ax2.set_xlabel(x_label)
+    ax2.set_ylabel(y_label)
     title2 = 'Averaged Processed Spectra' if spectrum_type == "No Filtering" else f'Averaged Processed Spectra ({spectrum_type})'
     ax2.set_title(title2)
     ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -615,7 +626,7 @@ if uploaded_file is not None:
                     fig_loadings.update_layout(barmode='group',
                                                height=400, showlegend=True,
                                                title="Loadings: Grouped Bar Graph (Abs Values)",
-                                               xaxis_title="Variables",
+                                               xaxis_title=loadings_x_label,
                                                yaxis_title="Loading Magnitude")
                     fig_loadings.update_xaxes(tickangle=45, tickfont=dict(size=9))
                    
@@ -633,7 +644,7 @@ if uploaded_file is not None:
                     fig_loadings = px.line(loadings_melt, x='Variable', y='Loading', color='PC',
                                            markers=False,
                                            title="Loadings: Connected Line Plot (Abs Values)",
-                                           labels={'Variable': 'Factors/Variables', 'Loading': 'Loading Magnitude'})
+                                           labels={'Variable': loadings_x_label, 'Loading': 'Loading Magnitude'})
                     fig_loadings.update_traces(line=dict(width=2, dash='solid')) # Continuous solid lines
                     fig_loadings.update_xaxes(tickangle=45, tickfont=dict(size=9))
                    
