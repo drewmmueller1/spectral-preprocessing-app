@@ -127,6 +127,7 @@ if uploaded_file is not None:
         if label_mode == "Sex":
             counts = pd.Series(labels).value_counts()
             fig = px.bar(x=counts.index, y=counts.values, title="Sex Distribution")
+            fig.update_layout(xaxis_title="Sex", yaxis_title="Count")
             st.plotly_chart(fig)
         elif label_mode == "Age":
             ages = [samples_info[col]['age'] for col in data_cols if samples_info[col]['age'] >= 0]
@@ -134,10 +135,19 @@ if uploaded_file is not None:
             for age in ages:
                 age_dist[age] += 1
             fig = px.bar(x=age_dist.index, y=age_dist.values, title="Age Distribution (0-100)")
+            fig.update_layout(xaxis_title="Age", yaxis_title="Count")
             st.plotly_chart(fig)
             num_unknown = sum(1 for col in data_cols if samples_info[col]['age'] < 0)
             if num_unknown > 0:
                 st.info(f"Unknown ages: {num_unknown}")
+        
+        # Filter out Unknown labels for further analysis
+        valid_mask = [l != "Unknown" for l in labels]
+        data_cols = [data_cols[i] for i, keep in enumerate(valid_mask) if keep]
+        labels = [labels[i] for i, keep in enumerate(valid_mask) if keep]
+        samples_info = {col: samples_info[col] for col in data_cols}
+        st.subheader("Filtered Sample Information (Excluding Unknown)")
+        st.dataframe(pd.DataFrame(samples_info).T)
    
     # Spectrum filtering in sidebar
     with st.sidebar:
@@ -225,9 +235,6 @@ if uploaded_file is not None:
             "Male": (1.0, 0.0, 0.0),  # Red
             "Female": (0.0, 0.0, 1.0)  # Blue
         }
-        # Add color for Unknown if present
-        if "Unknown" in unique_labels:
-            label_to_rgb["Unknown"] = (0.5, 0.5, 0.5)  # Gray
         color_discrete_map = {label: mcolors.to_hex(rgb) for label, rgb in label_to_rgb.items()}
     else:
         n_colors = len(unique_labels)
