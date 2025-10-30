@@ -15,6 +15,7 @@ from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
+import matplotlib.colors as mcolors
 from mlxtend.plotting import plot_decision_regions
 from scipy.signal import savgol_filter
 import seaborn as sns
@@ -133,14 +134,38 @@ if uploaded_file is not None:
             if std_val != 0:
                 processed_df[col] = (processed_df[col] - mean_val) / std_val
 
+    # Compute labels and consistent colors
+    labels = [col.split('_')[0] if '_' in col else col for col in data_cols]
+    unique_labels = sorted(set(labels))
+    n_colors = len(unique_labels)
+    colors_rgb = sns.color_palette("husl", n_colors)
+    label_to_rgb = {label: colors_rgb[i] for i, label in enumerate(unique_labels)}
+    color_discrete_map = {label: mcolors.to_hex(rgb) for label, rgb in label_to_rgb.items()}
+
+    # Compute full spectral axis, sample groups, and averages before iPLS
+    full_spectral = processed_df[spectral_col].copy()
+    sample_groups = {}
+    for col in data_cols:
+        prefix = col.split('_')[0] if '_' in col else col
+        if prefix not in sample_groups:
+            sample_groups[prefix] = []
+        sample_groups[prefix].append(col)
+   
+    averages = {}
+    for prefix, cols in sample_groups.items():
+        averages[prefix] = processed_df[cols].mean(axis=1).copy()
+
     # Option for separate sample labels
     show_sep_samples = st.checkbox("Show separate sample labels for all spectra", key="sep_all_spec")
 
     # Plot all processed spectra (full, before any iPLS filtering)
     st.subheader("All Processed Spectra")
     fig1, ax1 = plt.subplots(figsize=(12, 6))
-    for col in data_cols:
-        ax1.plot(processed_df[spectral_col], processed_df[col], alpha=0.7)
+    for prefix, cols in sample_groups.items():
+        color = label_to_rgb[prefix]
+        alpha_line = 0.5 if len(cols) > 1 else 1.0
+        for col in cols:
+            ax1.plot(processed_df[spectral_col], processed_df[col], color=color, alpha=alpha_line)
     ax1.set_xlabel(x_label)
     ax1.set_ylabel(y_label)
     title1 = 'All Processed Spectra' if spectrum_type == "No Filtering" else f'All Processed Spectra ({spectrum_type})'
@@ -154,21 +179,10 @@ if uploaded_file is not None:
         ax_samp.axis('off')
         y_pos = np.linspace(0.9, 0.1, len(data_cols))
         for i, col in enumerate(data_cols):
-            ax_samp.text(0.05, y_pos[i], col, transform=ax_samp.transAxes, va='center', fontsize=max(8, 100 / len(data_cols)))
+            prefix = labels[i]
+            color = label_to_rgb[prefix]
+            ax_samp.text(0.05, y_pos[i], col, transform=ax_samp.transAxes, va='center', fontsize=max(8, 100 / len(data_cols)), color=color)
         st.pyplot(fig_samp)
-    
-    # Compute full spectral axis, sample groups, and averages before iPLS
-    full_spectral = processed_df[spectral_col].copy()
-    sample_groups = {}
-    for col in data_cols:
-        prefix = col.split('_')[0] if '_' in col else col
-        if prefix not in sample_groups:
-            sample_groups[prefix] = []
-        sample_groups[prefix].append(col)
-   
-    averages = {}
-    for prefix, cols in sample_groups.items():
-        averages[prefix] = processed_df[cols].mean(axis=1).copy()
     
     # Display sample grouping
     st.subheader("Sample Grouping for Averaging")
@@ -182,15 +196,15 @@ if uploaded_file is not None:
     fig2, ax2 = plt.subplots(figsize=(10, 6))
     prefixes = list(averages.keys())
     num_groups = len(prefixes)
-    colors_avg = plt.cm.tab10(np.linspace(0, 1, num_groups))
     for i, prefix in enumerate(prefixes):
         avg = averages[prefix]
-        ax2.plot(full_spectral, avg, color=colors_avg[i], label=f'{prefix} Average', linewidth=2)
+        color = label_to_rgb[prefix]
+        ax2.plot(full_spectral, avg, color=color, label=f'{prefix} Average', linewidth=2)
     ax2.set_xlabel(x_label)
     ax2.set_ylabel(y_label)
     title2 = 'Averaged Processed Spectra' if spectrum_type == "No Filtering" else f'Averaged Processed Spectra ({spectrum_type})'
     ax2.set_title(title2)
-    if num_groups > 1:
+    if not show_sep_legend_avg and num_groups > 1:
         ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
     st.pyplot(fig2)
@@ -199,7 +213,7 @@ if uploaded_file is not None:
         st.subheader("Legend for Averaged Spectra")
         fig_leg, ax_leg = plt.subplots(figsize=(4, num_groups * 0.5 + 1))
         ax_leg.axis('off')
-        legend_elements = [Line2D([0], [0], color=colors_avg[i], lw=2, label=f'{prefix} Average') for i, prefix in enumerate(prefixes)]
+        legend_elements = [Line2D([0], [0], color=label_to_rgb[prefix], lw=2, label=f'{prefix} Average') for prefix in prefixes]
         ax_leg.legend(handles=legend_elements, loc='center')
         st.pyplot(fig_leg)
     
@@ -208,7 +222,6 @@ if uploaded_file is not None:
     if do_ipls:
         st.info("Applying iPLS Feature Selection...")
         # Prepare X and y
-        labels = [col.split('_')[0] if '_' in col else col for col in data_cols]
         le_ipls = LabelEncoder()
         y = le_ipls.fit_transform(labels)
         X = processed_df[data_cols].T.values  # samples x variables (wl)
@@ -434,16 +447,19 @@ if uploaded_file is not None:
         # Legend for colors and line
         green_patch = Patch(facecolor='green', alpha=0.7, label='Selected Intervals')
         red_patch = Patch(facecolor='red', alpha=0.5, label='Non-selected Intervals')
-        ax.legend(handles=[green_patch, red_patch], loc='upper right')
         
         # Twin axis for spectra
         ax2 = ax.twinx()
         ax2.set_ylabel(y_label)
         prefixes_ipls = list(averages_full.keys())
-        colors_ipls = plt.cm.tab10(np.linspace(0, 1, len(prefixes_ipls)))
         for i, prefix in enumerate(averages_full):
-            ax2.plot(full_x, averages_full[prefix], color=colors_ipls[i], alpha=0.7, linewidth=1, label=prefix)
-        ax2.legend(loc='lower right')
+            color = label_to_rgb[prefix]
+            ax2.plot(full_x, averages_full[prefix], color=color, alpha=0.7, linewidth=1, label=prefix)
+        
+        if not show_sep_legend_ipls:
+            ax.legend(handles=[green_patch, red_patch], loc='upper right')
+            if len(prefixes_ipls) > 0:
+                ax2.legend(loc='lower right')
         
         plt.title('iPLS Interval Selection (First Iteration)')
         plt.tight_layout()
@@ -462,7 +478,7 @@ if uploaded_file is not None:
                 st.subheader("iPLS Spectra Legend")
                 fig_leg_spec, ax_leg_spec = plt.subplots(figsize=(4, len(prefixes_ipls) * 0.5 + 1))
                 ax_leg_spec.axis('off')
-                legend_elements_spec = [Line2D([0], [0], color=colors_ipls[i], lw=2, label=prefix) for i, prefix in enumerate(prefixes_ipls)]
+                legend_elements_spec = [Line2D([0], [0], color=label_to_rgb[prefix], lw=2, label=prefix) for prefix in prefixes_ipls]
                 ax_leg_spec.legend(handles=legend_elements_spec, loc='center')
                 st.pyplot(fig_leg_spec)
         
@@ -507,7 +523,6 @@ if uploaded_file is not None:
         st.subheader("PCA Analysis")
         # Prepare data for PCA: Transpose to rows=samples, columns=wavenumbers
         X = processed_df[data_cols].T.reset_index(drop=True) # rows=samples, columns=wavenumbers
-        labels = [col.split('_')[0] if '_' in col else col for col in data_cols]
         y = pd.Series(labels)
        
         df_pca = X.copy()
@@ -556,28 +571,28 @@ if uploaded_file is not None:
            
             # Matplotlib for static plot
             fig, ax = plt.subplots(figsize=(8, 6))
-            unique_labels = df_plot_2d['label'].unique()
-            colors = plt.cm.tab10(np.linspace(0, 1, len(unique_labels)))
-            color_map = {label: color for label, color in zip(unique_labels, colors)}
+            unique_labels_pca = df_plot_2d['label'].unique()
+            color_map_pca = {label: label_to_rgb[label] for label in unique_labels_pca}
            
-            for label in unique_labels:
+            for label in unique_labels_pca:
                 mask = df_plot_2d['label'] == label
                 ax.scatter(df_plot_2d[mask]['PC1'], df_plot_2d[mask]['PC2'],
-                           c=[color_map[label]], label=label, s=50)
+                           c=[color_map_pca[label]], label=label, s=50)
            
             ax.set_xlabel(f"PC1 ({pca_2d.explained_variance_ratio_[0]:.1%})")
             ax.set_ylabel(f"PC2 ({pca_2d.explained_variance_ratio_[1]:.1%})")
             ax.set_title("Static 2D PCA Plot")
-            ax.legend()
+            if not show_sep_legend_pca2d:
+                ax.legend()
             ax.grid(True, alpha=0.3)
             st.pyplot(fig)
             plt.close(fig)
 
             if show_sep_legend_pca2d:
                 st.subheader("2D PCA Legend")
-                fig_leg_pca, ax_leg_pca = plt.subplots(figsize=(4, len(unique_labels) * 0.5 + 1))
+                fig_leg_pca, ax_leg_pca = plt.subplots(figsize=(4, len(unique_labels_pca) * 0.5 + 1))
                 ax_leg_pca.axis('off')
-                legend_elements_pca = [Line2D([0], [0], marker='o', color='w', markerfacecolor=color_map[label], markersize=8, label=label) for label in unique_labels]
+                legend_elements_pca = [Line2D([0], [0], marker='o', color='w', markerfacecolor=color_map_pca[label], markersize=8, label=label) for label in unique_labels_pca]
                 ax_leg_pca.legend(handles=legend_elements_pca, loc='center')
                 st.pyplot(fig_leg_pca)
         elif show_2d:
@@ -593,9 +608,10 @@ if uploaded_file is not None:
             df_plot['label'] = y
            
             fig_3d = px.scatter_3d(df_plot, x='PC1', y='PC2', z='PC3', color='label',
-                                   color_discrete_sequence=px.colors.qualitative.Set1)
+                                   color_discrete_map=color_discrete_map)
             fig_3d.update_traces(marker=dict(size=5))
             fig_3d.update_layout(title="Interactive 3D PCA Plot (Fixed to PC1-PC3)",
+                                 showlegend=not show_sep_legend_pca3d,
                                  scene=dict(
                                      xaxis_title=f"PC1 ({pca_3d.explained_variance_ratio_[0]:.1%})",
                                      yaxis_title=f"PC2 ({pca_3d.explained_variance_ratio_[1]:.1%})",
@@ -607,10 +623,10 @@ if uploaded_file is not None:
             if show_sep_legend_pca3d:
                 st.subheader("3D PCA Legend")
                 unique_l = df_plot['label'].unique()
-                colors_set1 = px.colors.qualitative.Set1[:len(unique_l)]
+                colors_leg = [color_discrete_map[label] for label in unique_l]
                 fig_leg3d = go.Figure()
                 for i, label in enumerate(unique_l):
-                    fig_leg3d.add_trace(go.Scatter3d(x=[None], y=[None], z=[None], mode='markers', marker=dict(color=colors_set1[i], size=10), name=label))
+                    fig_leg3d.add_trace(go.Scatter3d(x=[None], y=[None], z=[None], mode='markers', marker=dict(color=colors_leg[i], size=10), name=label))
                 fig_leg3d.update_layout(showlegend=True, title="3D PCA Legend")
                 st.plotly_chart(fig_leg3d)
         elif show_3d:
@@ -679,7 +695,8 @@ if uploaded_file is not None:
                 if loadings_type == "Bar Graph (Discrete, e.g., GCMS)":
                     # Vertical grouped bars (variables on x)
                     fig_loadings = go.Figure()
-                    colors_load = px.colors.qualitative.Set3[:num_valid]
+                    colors_load_rgb = sns.color_palette("Set1", num_valid)
+                    colors_load = [mcolors.to_hex(rgb) for rgb in colors_load_rgb]
                    
                     # Sort variables by max abs loading (descending) for bars
                     max_loadings = loadings_abs.max(axis=0)
@@ -694,7 +711,7 @@ if uploaded_file is not None:
                                                       base=0, offsetgroup=i))
                    
                     fig_loadings.update_layout(barmode='group',
-                                               height=400, showlegend=True,
+                                               height=400, showlegend=not show_sep_legend_load,
                                                title="Loadings: Grouped Bar Graph (Abs Values)",
                                                xaxis_title=loadings_x_label,
                                                yaxis_title="Loading Magnitude")
@@ -716,6 +733,7 @@ if uploaded_file is not None:
                                            title="Loadings: Connected Line Plot (Abs Values)",
                                            labels={'Variable': loadings_x_label, 'Loading': 'Loading Magnitude'})
                     fig_loadings.update_traces(line=dict(width=2, dash='solid')) # Continuous solid lines
+                    fig_loadings.update_layout(showlegend=not show_sep_legend_load)
                     fig_loadings.update_xaxes(tickangle=45, tickfont=dict(size=9))
                    
                     if len(original_vars) > 50:
@@ -733,7 +751,8 @@ if uploaded_file is not None:
                         fig_leg_load.update_layout(barmode='stack', title="Loadings Legend", yaxis_visible=False)
                         st.plotly_chart(fig_leg_load)
                     else:
-                        colors_line = px.colors.qualitative.Set1[:len(unique_pcs)]
+                        colors_line_rgb = sns.color_palette("Set1", len(unique_pcs))
+                        colors_line = [mcolors.to_hex(rgb) for rgb in colors_line_rgb]
                         fig_leg_line = go.Figure()
                         for i, pc in enumerate(unique_pcs):
                             fig_leg_line.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color=colors_line[i], width=4), name=pc))
