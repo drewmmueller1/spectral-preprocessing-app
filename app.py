@@ -14,6 +14,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
 from mlxtend.plotting import plot_decision_regions
 from scipy.signal import savgol_filter
 import seaborn as sns
@@ -53,8 +54,9 @@ if uploaded_file is not None:
         st.stop()
     
     # Spectrum filtering in sidebar
-    st.sidebar.subheader("Spectrum Filtering")
-    spectrum_type = st.sidebar.radio("Choose filtering:", ["No Filtering", "MSP Spectra", "FTIR Spectra"], index=0)
+    with st.sidebar:
+        with st.expander("Spectrum Filtering", expanded=False):
+            spectrum_type = st.radio("Choose filtering:", ["No Filtering", "MSP Spectra", "FTIR Spectra"], index=0)
     
     # Apply filtering based on type
     if spectrum_type == "MSP Spectra":
@@ -73,10 +75,11 @@ if uploaded_file is not None:
     st.success(f"Loaded {len(data_cols)} samples. {filter_msg}")
    
     # Axis label customization in sidebar
-    st.sidebar.subheader("Axis Label Customization")
-    custom_x_label = st.sidebar.text_input("X-Axis Label for Spectra and iPLS Plots (leave blank for 'Spectral Axis')", "")
-    custom_y_label = st.sidebar.text_input("Y-Axis Label for Spectra and iPLS Twin Axis (leave blank for 'Processed Intensity')", "")
-    custom_loadings_x_label = st.sidebar.text_input("X-Axis Label for Factor Loadings Plot (leave blank for 'Factors/Variables')", "")
+    with st.sidebar:
+        with st.expander("Axis Label Customization", expanded=False):
+            custom_x_label = st.text_input("X-Axis Label for Spectra and iPLS Plots (leave blank for 'Spectral Axis')", "")
+            custom_y_label = st.text_input("Y-Axis Label for Spectra and iPLS Twin Axis (leave blank for 'Processed Intensity')", "")
+            custom_loadings_x_label = st.text_input("X-Axis Label for Factor Loadings Plot (leave blank for 'Factors/Variables')", "")
     
     # Set axis labels based on user input or defaults
     x_label = custom_x_label if custom_x_label.strip() else "Spectral Axis"
@@ -84,18 +87,19 @@ if uploaded_file is not None:
     loadings_x_label = custom_loadings_x_label if custom_loadings_x_label.strip() else "Factors/Variables"
    
     # Preprocessing options in sidebar
-    st.sidebar.subheader("Preprocessing Options")
-    do_normalize = st.sidebar.checkbox("Normalize (scale by max)", value=False)
-    do_zscore = st.sidebar.checkbox("Z-Score Standardization", value=False)
-    do_smooth = st.sidebar.checkbox("Smooth (Savitzky-Golay filter)", value=False)
-    if do_smooth:
-        window_length = st.sidebar.slider("SG Window Length (odd number recommended)", min_value=3, max_value=101, value=15, step=2)
-        polyorder = st.sidebar.slider("SG Polyorder", min_value=1, max_value=5, value=1)
-        deriv = st.sidebar.slider("SG Derivative Order", min_value=0, max_value=3, value=0)
-        if polyorder >= window_length:
-            st.sidebar.warning("Polyorder should be less than window length for best results.")
-    do_snv = st.sidebar.checkbox("SNV Standardization", value=False)
-    do_ipls = st.sidebar.checkbox("iPLS Feature Selection", value=False)
+    with st.sidebar:
+        with st.expander("Preprocessing Options", expanded=False):
+            do_normalize = st.checkbox("Normalize (scale by max)", value=False)
+            do_zscore = st.checkbox("Z-Score Standardization", value=False)
+            do_smooth = st.checkbox("Smooth (Savitzky-Golay filter)", value=False)
+            if do_smooth:
+                window_length = st.slider("SG Window Length (odd number recommended)", min_value=3, max_value=101, value=15, step=2)
+                polyorder = st.slider("SG Polyorder", min_value=1, max_value=5, value=1)
+                deriv = st.slider("SG Derivative Order", min_value=0, max_value=3, value=0)
+                if polyorder >= window_length:
+                    st.warning("Polyorder should be less than window length for best results.")
+            do_snv = st.checkbox("SNV Standardization", value=False)
+            do_ipls = st.checkbox("iPLS Feature Selection", value=False)
    
     # Apply preprocessing based on selections
     processed_df = df.copy()
@@ -129,6 +133,9 @@ if uploaded_file is not None:
             if std_val != 0:
                 processed_df[col] = (processed_df[col] - mean_val) / std_val
 
+    # Option for separate sample labels
+    show_sep_samples = st.checkbox("Show separate sample labels for all spectra", key="sep_all_spec")
+
     # Plot all processed spectra (full, before any iPLS filtering)
     st.subheader("All Processed Spectra")
     fig1, ax1 = plt.subplots(figsize=(12, 6))
@@ -140,6 +147,15 @@ if uploaded_file is not None:
     ax1.set_title(title1)
     plt.tight_layout()
     st.pyplot(fig1)
+
+    if show_sep_samples:
+        st.subheader("Sample Labels")
+        fig_samp, ax_samp = plt.subplots(figsize=(8, max(4, len(data_cols) * 0.1)))
+        ax_samp.axis('off')
+        y_pos = np.linspace(0.9, 0.1, len(data_cols))
+        for i, col in enumerate(data_cols):
+            ax_samp.text(0.05, y_pos[i], col, transform=ax_samp.transAxes, va='center', fontsize=max(8, 100 / len(data_cols)))
+        st.pyplot(fig_samp)
     
     # Compute full spectral axis, sample groups, and averages before iPLS
     full_spectral = processed_df[spectral_col].copy()
@@ -157,19 +173,35 @@ if uploaded_file is not None:
     # Display sample grouping
     st.subheader("Sample Grouping for Averaging")
     st.write("Detected groups:", list(sample_groups.keys()))
+
+    # Option for separate legend
+    show_sep_legend_avg = st.checkbox("Show separate legend for averaged spectra", key="sep_avg")
    
     # Plot 2: Averaged spectra using pre-iPLS data
     st.subheader("Averaged Processed Spectra")
     fig2, ax2 = plt.subplots(figsize=(10, 6))
-    for prefix, avg in averages.items():
-        ax2.plot(full_spectral, avg, label=f'{prefix} Average', linewidth=2)
+    prefixes = list(averages.keys())
+    num_groups = len(prefixes)
+    colors_avg = plt.cm.tab10(np.linspace(0, 1, num_groups))
+    for i, prefix in enumerate(prefixes):
+        avg = averages[prefix]
+        ax2.plot(full_spectral, avg, color=colors_avg[i], label=f'{prefix} Average', linewidth=2)
     ax2.set_xlabel(x_label)
     ax2.set_ylabel(y_label)
     title2 = 'Averaged Processed Spectra' if spectrum_type == "No Filtering" else f'Averaged Processed Spectra ({spectrum_type})'
     ax2.set_title(title2)
-    ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    if num_groups > 1:
+        ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
     st.pyplot(fig2)
+
+    if show_sep_legend_avg and num_groups > 0:
+        st.subheader("Legend for Averaged Spectra")
+        fig_leg, ax_leg = plt.subplots(figsize=(4, num_groups * 0.5 + 1))
+        ax_leg.axis('off')
+        legend_elements = [Line2D([0], [0], color=colors_avg[i], lw=2, label=f'{prefix} Average') for i, prefix in enumerate(prefixes)]
+        ax_leg.legend(handles=legend_elements, loc='center')
+        st.pyplot(fig_leg)
     
     # iPLS 
     ipls_fig = None
@@ -189,19 +221,20 @@ if uploaded_file is not None:
         # Use pre-computed averages and full_x for iPLS plot
         averages_full = averages
         full_x = full_spectral.values
-        
+
         # iPLS Parameters in sidebar
-        st.sidebar.subheader("iPLS Parameters")
-        n_vars = X.shape[1]
-        if n_vars == 0:
-            st.error("No variables after preprocessing.")
-            st.stop()
-        
-        n_intervals = st.sidebar.slider("Number of Intervals", min_value=5, max_value=100, value=min(50, max(10, n_vars // 10)), step=1)
-        interval_size = n_vars // n_intervals
-        max_ncomp = st.sidebar.slider("Maximum Number of Components", min_value=1, max_value=min(20, n_vars, num_unique_y - 1), value=min(10, n_vars // 10, num_unique_y - 1), step=1)
-        max_iter = st.sidebar.slider("Maximum Iterations", min_value=1, max_value=100, value=n_intervals, step=1)
-        st.sidebar.info(f"iPLS Parameters: n_intervals={n_intervals}, max_ncomp={max_ncomp}, max_iter={max_iter}")
+        with st.sidebar:
+            with st.expander("iPLS Parameters", expanded=False):
+                n_vars = X.shape[1]
+                if n_vars == 0:
+                    st.error("No variables after preprocessing.")
+                    st.stop()
+                
+                n_intervals = st.slider("Number of Intervals", min_value=5, max_value=100, value=min(50, max(10, n_vars // 10)), step=1)
+                interval_size = n_vars // n_intervals
+                max_ncomp = st.slider("Maximum Number of Components", min_value=1, max_value=min(20, n_vars, num_unique_y - 1), value=min(10, n_vars // 10, num_unique_y - 1), step=1)
+                max_iter = st.slider("Maximum Iterations", min_value=1, max_value=100, value=n_intervals, step=1)
+                st.info(f"iPLS Parameters: n_intervals={n_intervals}, max_ncomp={max_ncomp}, max_iter={max_iter}")
         
         # Generate intervals
         intervals = []
@@ -371,6 +404,9 @@ if uploaded_file is not None:
             st.error(f"iPLS global RMSECV computation failed with parameters max_ncomp={max_ncomp}. Error: {str(e)}")
             global_rmse = np.inf
             best_nc_global = 1
+
+        # Option for separate legends
+        show_sep_legend_ipls = st.checkbox("Show separate legends for iPLS plot", key="sep_ipls")
         
         # iPLS Plot: First iteration intervals
         st.subheader("iPLS Interval Selection Plot")
@@ -403,15 +439,32 @@ if uploaded_file is not None:
         # Twin axis for spectra
         ax2 = ax.twinx()
         ax2.set_ylabel(y_label)
-        prefixes = list(averages_full.keys())
-        colors = plt.cm.tab10(np.linspace(0, 1, len(prefixes)))
+        prefixes_ipls = list(averages_full.keys())
+        colors_ipls = plt.cm.tab10(np.linspace(0, 1, len(prefixes_ipls)))
         for i, prefix in enumerate(averages_full):
-            ax2.plot(full_x, averages_full[prefix], color=colors[i], alpha=0.7, linewidth=1, label=prefix)
+            ax2.plot(full_x, averages_full[prefix], color=colors_ipls[i], alpha=0.7, linewidth=1, label=prefix)
         ax2.legend(loc='lower right')
         
         plt.title('iPLS Interval Selection (First Iteration)')
         plt.tight_layout()
         st.pyplot(fig_ipls)
+
+        if show_sep_legend_ipls:
+            # Interval legend
+            st.subheader("iPLS Interval Legend")
+            fig_leg_int, ax_leg_int = plt.subplots(figsize=(3, 2))
+            ax_leg_int.axis('off')
+            ax_leg_int.legend(handles=[green_patch, red_patch], loc='center')
+            st.pyplot(fig_leg_int)
+
+            # Spectra legend
+            if prefixes_ipls:
+                st.subheader("iPLS Spectra Legend")
+                fig_leg_spec, ax_leg_spec = plt.subplots(figsize=(4, len(prefixes_ipls) * 0.5 + 1))
+                ax_leg_spec.axis('off')
+                legend_elements_spec = [Line2D([0], [0], color=colors_ipls[i], lw=2, label=prefix) for i, prefix in enumerate(prefixes_ipls)]
+                ax_leg_spec.legend(handles=legend_elements_spec, loc='center')
+                st.pyplot(fig_leg_spec)
         
         # RMSE vs Iterations plot
         if rmse_history:
@@ -446,8 +499,9 @@ if uploaded_file is not None:
     )
    
     # PCA option in sidebar
-    st.sidebar.subheader("Analysis Options")
-    do_pca = st.sidebar.checkbox("Perform PCA Analysis", value=False)
+    with st.sidebar:
+        with st.expander("Analysis Options", expanded=False):
+            do_pca = st.checkbox("Perform PCA Analysis", value=False)
    
     if do_pca:
         st.subheader("PCA Analysis")
@@ -477,22 +531,23 @@ if uploaded_file is not None:
         var_ratios = pca_full.explained_variance_ratio_
        
         # Sidebar options for PCA plots
-        st.sidebar.header("PCA Plot Options")
-        show_2d = st.sidebar.checkbox("Show 2D PCA Plot (Static)", value=True)
-        show_3d = st.sidebar.checkbox("Show 3D PCA Plot (Interactive)", value=True)
-        show_scree = st.sidebar.checkbox("Show Scree Plot", value=True)
-        show_loadings = st.sidebar.checkbox("Show Loadings Plot (Top 3 PCs)", value=True)
-       
-        if show_loadings:
-            loadings_type = st.sidebar.selectbox("Loadings Plot Type", ["Bar Graph (Discrete, e.g., GCMS)", "Connected Scatterplot (Continuous, e.g., Spectroscopy)"], index=1)
-        else:
-            loadings_type = "Connected Scatterplot (Continuous, e.g., Spectroscopy)"
-       
-        st.sidebar.header("Download Options")
-        num_save_pcs = st.sidebar.slider("Number of PCs to Save", 1, min(10, n_total_pcs), 3)
+        with st.sidebar:
+            with st.expander("PCA Plot Options", expanded=False):
+                show_2d = st.checkbox("Show 2D PCA Plot (Static)", value=True)
+                show_3d = st.checkbox("Show 3D PCA Plot (Interactive)", value=True)
+                show_scree = st.checkbox("Show Scree Plot", value=True)
+                show_loadings = st.checkbox("Show Loadings Plot (Top 3 PCs)", value=True)
+
+            if show_loadings:
+                with st.expander("Loadings Options", expanded=False):
+                    loadings_type = st.selectbox("Loadings Plot Type", ["Bar Graph (Discrete, e.g., GCMS)", "Connected Scatterplot (Continuous, e.g., Spectroscopy)"], index=1)
+
+            with st.expander("Download Options", expanded=False):
+                num_save_pcs = st.slider("Number of PCs to Save", 1, min(10, n_total_pcs), 3)
        
         # 1. 2D PCA Plot (Static, first 2 PCs)
         if show_2d and n_total_pcs >= 2:
+            show_sep_legend_pca2d = st.checkbox("Show separate legend for 2D PCA", key="sep_pca2d")
             st.subheader("2D PCA Plot (PC1 vs PC2)")
             pca_2d = PCA(n_components=2)
             X_pca_2d = pca_2d.fit_transform(X_scaled)
@@ -517,11 +572,20 @@ if uploaded_file is not None:
             ax.grid(True, alpha=0.3)
             st.pyplot(fig)
             plt.close(fig)
+
+            if show_sep_legend_pca2d:
+                st.subheader("2D PCA Legend")
+                fig_leg_pca, ax_leg_pca = plt.subplots(figsize=(4, len(unique_labels) * 0.5 + 1))
+                ax_leg_pca.axis('off')
+                legend_elements_pca = [Line2D([0], [0], marker='o', color='w', markerfacecolor=color_map[label], markersize=8, label=label) for label in unique_labels]
+                ax_leg_pca.legend(handles=legend_elements_pca, loc='center')
+                st.pyplot(fig_leg_pca)
         elif show_2d:
             st.warning("Need at least 2 features for 2D plot.")
        
         # 2. 3D PCA Plot (Interactive, first 3 PCs)
         if show_3d and n_total_pcs >= 3:
+            show_sep_legend_pca3d = st.checkbox("Show separate legend for 3D PCA", key="sep_pca3d")
             st.subheader("3D PCA Plot (Interactive: Rotate/Zoom with Mouse)")
             pca_3d = PCA(n_components=3)
             X_pca_3d = pca_3d.fit_transform(X_scaled)
@@ -539,6 +603,16 @@ if uploaded_file is not None:
                                  ))
            
             st.plotly_chart(fig_3d, use_container_width=True)
+
+            if show_sep_legend_pca3d:
+                st.subheader("3D PCA Legend")
+                unique_l = df_plot['label'].unique()
+                colors_set1 = px.colors.qualitative.Set1[:len(unique_l)]
+                fig_leg3d = go.Figure()
+                for i, label in enumerate(unique_l):
+                    fig_leg3d.add_trace(go.Scatter3d(x=[None], y=[None], z=[None], mode='markers', marker=dict(color=colors_set1[i], size=10), name=label))
+                fig_leg3d.update_layout(showlegend=True, title="3D PCA Legend")
+                st.plotly_chart(fig_leg3d)
         elif show_3d:
             st.warning("Need at least 3 features for 3D plot.")
        
@@ -581,6 +655,7 @@ if uploaded_file is not None:
        
         # 4. Factor Loadings Plot
         if show_loadings:
+            show_sep_legend_load = st.checkbox("Show separate legend for loadings", key="sep_load")
             st.subheader("Factor Loadings Plot (Top 3 PCs)")
             # First 3 PCs
             max_pcs = min(3, n_total_pcs)
@@ -604,7 +679,7 @@ if uploaded_file is not None:
                 if loadings_type == "Bar Graph (Discrete, e.g., GCMS)":
                     # Vertical grouped bars (variables on x)
                     fig_loadings = go.Figure()
-                    colors = px.colors.qualitative.Set3[:num_valid]
+                    colors_load = px.colors.qualitative.Set3[:num_valid]
                    
                     # Sort variables by max abs loading (descending) for bars
                     max_loadings = loadings_abs.max(axis=0)
@@ -615,7 +690,7 @@ if uploaded_file is not None:
                     for i, pc in enumerate(loadings.index):
                         pc_data = loadings_abs.loc[pc].loc[sorted_vars]
                         fig_loadings.add_trace(go.Bar(y=pc_data.values, x=sorted_vars,
-                                                      name=pc, marker_color=colors[i], width=width,
+                                                      name=pc, marker_color=colors_load[i], width=width,
                                                       base=0, offsetgroup=i))
                    
                     fig_loadings.update_layout(barmode='group',
@@ -647,6 +722,23 @@ if uploaded_file is not None:
                         st.warning("Many variables (>50)—zoom/pan the plot for details in spectroscopy data.")
                
                 st.plotly_chart(fig_loadings, use_container_width=True)
+
+                if show_sep_legend_load:
+                    st.subheader("Loadings Legend")
+                    unique_pcs = loadings.index.tolist()
+                    if loadings_type == "Bar Graph (Discrete, e.g., GCMS)":
+                        fig_leg_load = go.Figure()
+                        for i, pc in enumerate(unique_pcs):
+                            fig_leg_load.add_trace(go.Bar(x=[pc], y=[1], marker_color=colors_load[i], name=pc, showlegend=True))
+                        fig_leg_load.update_layout(barmode='stack', title="Loadings Legend", yaxis_visible=False)
+                        st.plotly_chart(fig_leg_load)
+                    else:
+                        colors_line = px.colors.qualitative.Set1[:len(unique_pcs)]
+                        fig_leg_line = go.Figure()
+                        for i, pc in enumerate(unique_pcs):
+                            fig_leg_line.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color=colors_line[i], width=4), name=pc))
+                        fig_leg_line.update_layout(title="Loadings PC Legend")
+                        st.plotly_chart(fig_leg_line)
                
                 # Show loadings table
                 st.subheader("Loadings Table (Top 3 PCs)")
