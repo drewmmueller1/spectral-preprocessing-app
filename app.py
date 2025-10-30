@@ -143,9 +143,23 @@ if uploaded_file is not None:
     if len(filtered_data_cols) < len(data_cols):
         st.info(f"Filtered to {len(filtered_data_cols)} samples from {len(data_cols)}.")
         data_cols = filtered_data_cols
-        # Update df? No, df has all columns, but we'll use only data_cols
-        # Actually, to filter df, but since it's row-wise spectral, we need to keep all rows, but only plot/use selected columns.
-        # But for processing, it's fine, as we loop over data_cols.
+    
+    # Update info_df to filtered
+    filtered_samples_info = {col: samples_info[col] for col in data_cols}
+    info_df_filtered = pd.DataFrame(filtered_samples_info).T
+    st.subheader("Filtered Sample Information")
+    st.dataframe(info_df_filtered)
+    
+    st.subheader("Labeling Mode")
+    label_mode = st.radio("Label by:", ["Original Prefix", "Sex", "Age"], index=0)
+    
+    # Compute labels based on mode
+    if label_mode == "Original Prefix":
+        labels = [col.split('_')[0] if '_' in col else col for col in data_cols]
+    elif label_mode == "Sex":
+        labels = ["Male" if samples_info[col]['sex'] == "M" else "Female" for col in data_cols]
+    elif label_mode == "Age":
+        labels = [str(samples_info[col]['age']) if samples_info[col]['age'] >= 0 else "Unknown" for col in data_cols]
     
     # Spectrum filtering in sidebar
     with st.sidebar:
@@ -228,7 +242,6 @@ if uploaded_file is not None:
                 processed_df[col] = (processed_df[col] - mean_val) / std_val
 
     # Compute labels and consistent colors
-    labels = [col.split('_')[0] if '_' in col else col for col in data_cols]
     unique_labels = sorted(set(labels))
     n_colors = len(unique_labels)
     wl_range = np.linspace(380, 750, n_colors)
@@ -240,8 +253,8 @@ if uploaded_file is not None:
     # Compute full spectral axis, sample groups, and averages before iPLS
     full_spectral = processed_df[spectral_col].copy()
     sample_groups = {}
-    for col in data_cols:
-        prefix = col.split('_')[0] if '_' in col else col
+    for i, col in enumerate(data_cols):
+        prefix = labels[i]
         if prefix not in sample_groups:
             sample_groups[prefix] = []
         sample_groups[prefix].append(col)
