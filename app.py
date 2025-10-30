@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import re
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import KFold, train_test_split, GridSearchCV
@@ -87,7 +88,7 @@ if uploaded_file is not None:
         st.error("CSV must have at least 2 columns: spectral axis and data.")
         st.stop()
    
-    spectral_col =df.columns[0]
+    spectral_col = df.columns[0]
     data_cols = df.columns[1:]
    
     # Convert spectral axis to numeric
@@ -97,6 +98,54 @@ if uploaded_file is not None:
     if df.empty:
         st.error("No data after cleaning spectral axis.")
         st.stop()
+    
+    # Label parsing and filtering
+    samples_info = {}
+    for col in data_cols:
+        match = re.search(r'([mf])(\d{2})_', col)
+        if match:
+            samples_info[col] = {
+                'sex': match.group(1).upper(), 
+                'age': int(match.group(2))
+            }
+        else:
+            samples_info[col] = {'sex': 'Unknown', 'age': -1}
+    
+    info_df = pd.DataFrame(samples_info).T
+    st.subheader("Parsed Sample Information")
+    st.dataframe(info_df)
+    
+    st.subheader("Filter by Sex and Age")
+    col1, col2 = st.columns(2)
+    with col1:
+        sex_filter = st.radio("Sex Filter:", ["All", "Male", "Female"], index=0)
+    with col2:
+        age_min, age_max = st.slider("Age Range:", 0, 100, (0, 100), key="age_slider")
+    
+    # Apply filters
+    filtered_data_cols = []
+    for col in data_cols:
+        info = samples_info[col]
+        keep = True
+        if sex_filter == "Male" and info['sex'] != "M":
+            keep = False
+        elif sex_filter == "Female" and info['sex'] != "F":
+            keep = False
+        if info['age'] >= 0 and (info['age'] < age_min or info['age'] > age_max):
+            keep = False
+        if keep:
+            filtered_data_cols.append(col)
+    
+    if len(filtered_data_cols) == 0:
+        st.warning("No samples match the filter criteria.")
+        st.stop()
+    
+    if len(filtered_data_cols) < len(data_cols):
+        st.info(f"Filtered to {len(filtered_data_cols)} samples from {len(data_cols)}.")
+        data_cols = filtered_data_cols
+        # Update df? No, df has all columns, but we'll use only data_cols
+        # Actually, to filter df, but since it's row-wise spectral, we need to keep all rows, but only plot/use selected columns.
+        # But for processing, it's fine, as we loop over data_cols.
     
     # Spectrum filtering in sidebar
     with st.sidebar:
