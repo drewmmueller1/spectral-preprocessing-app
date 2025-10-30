@@ -20,6 +20,50 @@ from mlxtend.plotting import plot_decision_regions
 from scipy.signal import savgol_filter
 import seaborn as sns
 
+def wavelength_to_rgb(wavelength, gamma=0.8):
+    '''This converts a given wavelength of light to an
+    approximate RGB color value. The wavelength must be given
+    in nanometers in the range from 380 nm through 750 nm
+    (789 THz through 400 THz).
+    Based on code by Dan Bruton
+    http://www.physics.sfasu.edu/astro/color/spectra.html
+    '''
+    wavelength = float(wavelength)
+    if wavelength >= 380 and wavelength <= 440:
+        attenuation = 0.3 + 0.7 * (wavelength - 380) / (440 - 380)
+        R = ((-(wavelength - 440) / (440 - 380)) * attenuation) ** gamma
+        G = 0.0
+        B = (1.0 * attenuation) ** gamma
+    elif wavelength >= 440 and wavelength <= 490:
+        R = 0.0
+        G = ((wavelength - 440) / (490 - 440)) ** gamma
+        B = 1.0
+    elif wavelength >= 490 and wavelength <= 510:
+        R = 0.0
+        G = 1.0
+        B = (-(wavelength - 510) / (510 - 490)) ** gamma
+    elif wavelength >= 510 and wavelength <= 580:
+        R = ((wavelength - 510) / (580 - 510)) ** gamma
+        G = 1.0
+        B = 0.0
+    elif wavelength >= 580 and wavelength <= 645:
+        R = 1.0
+        G = (-(wavelength - 645) / (645 - 580)) ** gamma
+        B = 0.0
+    elif wavelength >= 645 and wavelength <= 750:
+        attenuation = 0.3 + 0.7 * (750 - wavelength) / (750 - 645)
+        R = (1.0 * attenuation) ** gamma
+        G = 0.0
+        B = 0.0
+    else:
+        R = 0.0
+        G = 0.0
+        B = 0.0
+    R *= 255
+    G *= 255
+    B *= 255
+    return (int(R), int(G), int(B))
+
 # Title and instructions
 st.title("Spectral Preprocessing and PCA Visualization App")
 st.markdown("""
@@ -43,7 +87,7 @@ if uploaded_file is not None:
         st.error("CSV must have at least 2 columns: spectral axis and data.")
         st.stop()
    
-    spectral_col = df.columns[0]
+    spectral_col =df.columns[0]
     data_cols = df.columns[1:]
    
     # Convert spectral axis to numeric
@@ -138,7 +182,9 @@ if uploaded_file is not None:
     labels = [col.split('_')[0] if '_' in col else col for col in data_cols]
     unique_labels = sorted(set(labels))
     n_colors = len(unique_labels)
-    colors_rgb = sns.color_palette("husl", n_colors)
+    wl_range = np.linspace(380, 750, n_colors)
+    rgb_ints = [wavelength_to_rgb(wl) for wl in wl_range]
+    colors_rgb = [(r/255.0, g/255.0, b/255.0) for r, g, b in rgb_ints]
     label_to_rgb = {label: colors_rgb[i] for i, label in enumerate(unique_labels)}
     color_discrete_map = {label: mcolors.to_hex(rgb) for label, rgb in label_to_rgb.items()}
 
