@@ -111,41 +111,6 @@ if uploaded_file is not None:
     st.subheader("Parsed Sample Information")
     st.dataframe(info_df)
    
-    st.subheader("Filter by Sex and Age")
-    col1, col2 = st.columns(2)
-    with col1:
-        sex_filter = st.radio("Sex Filter:", ["All", "Male", "Female"], index=0)
-    with col2:
-        age_min, age_max = st.slider("Age Range:", 0, 100, (0, 100), key="age_slider")
-   
-    # Apply filters
-    filtered_data_cols = []
-    for col in data_cols:
-        info = samples_info[col]
-        keep = True
-        if sex_filter == "Male" and info['sex'] != "M":
-            keep = False
-        elif sex_filter == "Female" and info['sex'] != "F":
-            keep = False
-        if info['age'] >= 0 and (info['age'] < age_min or info['age'] > age_max):
-            keep = False
-        if keep:
-            filtered_data_cols.append(col)
-   
-    if len(filtered_data_cols) == 0:
-        st.warning("No samples match the filter criteria.")
-        st.stop()
-   
-    if len(filtered_data_cols) < len(data_cols):
-        st.info(f"Filtered to {len(filtered_data_cols)} samples from {len(data_cols)}.")
-        data_cols = filtered_data_cols
-   
-    # Update info_df to filtered
-    filtered_samples_info = {col: samples_info[col] for col in data_cols}
-    info_df_filtered = pd.DataFrame(filtered_samples_info).T
-    st.subheader("Filtered Sample Information")
-    st.dataframe(info_df_filtered)
-   
     st.subheader("Labeling Mode")
     label_mode = st.radio("Label by:", ["Original Prefix", "Sex", "Age"], index=0)
    
