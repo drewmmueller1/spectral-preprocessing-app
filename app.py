@@ -587,7 +587,9 @@ if uploaded_file is not None:
     if do_pca:
         st.subheader("PCA Analysis")
         # Prepare data for PCA: Transpose to rows=samples, columns=wavenumbers
-        X = processed_df[data_cols].T.reset_index(drop=True) # rows=samples, columns=wavenumbers
+        X = processed_df[data_cols].T
+        X.columns = processed_df[spectral_col].values  # Set columns to spectral axis values
+        X = X.reset_index(drop=True)
         y = pd.Series(labels)
       
         df_pca = X.copy()
