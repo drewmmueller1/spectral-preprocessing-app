@@ -342,6 +342,8 @@ if uploaded_file is not None:
             st.error("iPLS requires at least 2 unique classes in labels.")
             st.stop()
        
+        n_samples = X.shape[0]
+        n_vars = X.shape[1]
         # Use pre-computed averages and full_x for iPLS plot
         averages_full = averages
         full_x = full_spectral.values
@@ -350,10 +352,12 @@ if uploaded_file is not None:
         def compute_best_rmse(X_temp, y, kf, max_ncomp, num_unique_y):
             if X_temp.shape[0] == 0 or X_temp.shape[1] == 0:
                 return np.inf, 1
+            n_temp_samples = X_temp.shape[0]
+            n_temp_vars = X_temp.shape[1]
             best_rmse_temp = np.inf
             best_nc_temp = 1
-            n_temp_vars = X_temp.shape[1]
-            for nc in range(1, min(max_ncomp, n_temp_vars, num_unique_y - 1) + 1):
+            max_nc_possible = min(max_ncomp, n_temp_samples, n_temp_vars, num_unique_y - 1)
+            for nc in range(1, max_nc_possible + 1):
                 rmse_cv = []
                 for train_idx, test_idx in kf.split(X_temp):
                     X_train, X_test = X_temp[train_idx], X_temp[test_idx]
@@ -377,35 +381,35 @@ if uploaded_file is not None:
         # iPLS Parameters in sidebar with auto-optimize
         with st.sidebar:
             with st.expander("iPLS Parameters", expanded=False):
-                n_vars = X.shape[1]
                 if n_vars == 0:
                     st.error("No variables after preprocessing.")
                     st.stop()
                 
                 auto_optimize = st.checkbox("Auto-optimize parameters", value=True)
+                max_ncomp_default = min(10, n_samples, n_vars, num_unique_y - 1)
                 if auto_optimize:
-                    n_intervals_opt = max(10, min(50, n_vars // 10))
-                    max_ncomp_opt = min(10, max(2, n_vars // 20), num_unique_y - 1)
-                    max_iter_opt = min(n_intervals_opt, 20)
+                    n_intervals_opt = max(5, min(50, n_vars // 5))  # Adjusted for small n_vars
+                    max_ncomp_opt = min(10, max(2, n_vars // 20, n_samples // 5), num_unique_y - 1)
+                    max_iter_opt = min(n_intervals_opt, max(5, n_samples // 2))
                     st.info(f"Auto-optimized: n_intervals={n_intervals_opt}, max_ncomp={max_ncomp_opt}, max_iter={max_iter_opt}")
                     n_intervals = n_intervals_opt
                     max_ncomp = max_ncomp_opt
                     max_iter = max_iter_opt
                 else:
-                    n_intervals = st.slider("Number of Intervals", min_value=5, max_value=100, value=min(50, max(10, n_vars // 10)), step=1)
-                    max_ncomp = st.slider("Maximum Number of Components", min_value=1, max_value=min(20, n_vars), value=min(10, n_vars // 10), step=1)
-                    max_iter = st.slider("Maximum Iterations", min_value=1, max_value=100, value=n_intervals, step=1)
+                    n_intervals = st.slider("Number of Intervals", min_value=5, max_value=min(100, n_vars), value=min(50, max(10, n_vars // 10)), step=1)
+                    max_ncomp = st.slider("Maximum Number of Components", min_value=1, max_value=min(20, n_samples, n_vars, num_unique_y - 1), value=min(10, n_samples, n_vars // 10, num_unique_y - 1), step=1)
+                    max_iter = st.slider("Maximum Iterations", min_value=1, max_value=min(100, n_intervals), value=min(n_intervals, max(10, n_samples // 2)), step=1)
        
         # Generate intervals
         intervals = []
-        interval_size = n_vars // n_intervals if n_intervals > 0 else n_vars
+        interval_size = max(1, n_vars // n_intervals) if n_intervals > 0 else n_vars
         for i in range(n_intervals):
             start = i * interval_size
             end = min((i + 1) * interval_size, n_vars)
             if start < end:  # Ensure non-empty
                 intervals.append((start, end))
        
-        kf = KFold(n_splits=5)
+        kf = KFold(n_splits=min(5, n_samples))  # Adjust folds if few samples
        
         # Forward iPLS selection with safeguard
         selected_intervals = []
