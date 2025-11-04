@@ -747,11 +747,10 @@ if uploaded_file is not None:
             else:
                 st.info(f"Showing loadings for {num_valid} valid PCs (out of top 3)")
               
-                # Subset loadings (use abs for magnitude)
+                # Subset loadings (no abs for plotting)
                 loadings = pd.DataFrame(pca_full.components_[valid_indices],
                                         columns=X_num.columns,
                                         index=[f'PC{i+1}' for i in valid_indices])
-                loadings_abs = loadings.abs()
               
                 if loadings_type == "Bar Graph (Discrete, e.g., GCMS)":
                     # Vertical grouped bars (variables on x)
@@ -760,27 +759,27 @@ if uploaded_file is not None:
                     colors_load = [mcolors.to_hex(rgb) for rgb in colors_load_rgb]
                   
                     # Sort variables by max abs loading (descending) for bars
-                    max_loadings = loadings_abs.max(axis=0)
+                    max_loadings = loadings.abs().max(axis=0)
                     sorted_vars = max_loadings.sort_values(ascending=False).index
                   
                     # Width for grouped bars
                     width = 0.25
                     for i, pc in enumerate(loadings.index):
-                        pc_data = loadings_abs.loc[pc].loc[sorted_vars]
+                        pc_data = loadings.loc[pc].loc[sorted_vars]
                         fig_loadings.add_trace(go.Bar(y=pc_data.values, x=sorted_vars,
                                                       name=pc, marker_color=colors_load[i], width=width,
                                                       base=0, offsetgroup=i))
                   
                     fig_loadings.update_layout(barmode='group',
                                                height=400, showlegend=not show_sep_legend_load,
-                                               title="Loadings: Grouped Bar Graph (Abs Values)",
+                                               title="Loadings: Grouped Bar Graph",
                                                xaxis_title=loadings_x_label,
-                                               yaxis_title="Loading Magnitude")
+                                               yaxis_title="Loading Value")
                     fig_loadings.update_xaxes(tickangle=45, tickfont=dict(size=9))
                   
                 else: # Connected Scatterplot (Continuous, e.g., Spectroscopy)
                     # Prepare for line plot: Melt to long format, preserve original variable order
-                    loadings_melt = loadings_abs.reset_index().melt(id_vars='index', var_name='Variable', value_name='Loading')
+                    loadings_melt = loadings.reset_index().melt(id_vars='index', var_name='Variable', value_name='Loading')
                     loadings_melt['PC'] = loadings_melt['index'] # Use PC name as color/group
                   
                     # Original order for continuous (e.g., wavelengths)
@@ -791,8 +790,8 @@ if uploaded_file is not None:
                     # Line plot: X=Variable, Y=Loading, color=PC, connected lines per PC, no markers
                     fig_loadings = px.line(loadings_melt, x='Variable', y='Loading', color='PC',
                                            markers=False,
-                                           title="Loadings: Connected Line Plot (Abs Values)",
-                                           labels={'Variable': loadings_x_label, 'Loading': 'Loading Magnitude'})
+                                           title="Loadings: Connected Line Plot",
+                                           labels={'Variable': loadings_x_label, 'Loading': 'Loading Value'})
                     fig_loadings.update_traces(line=dict(width=2, dash='solid')) # Continuous solid lines
                     fig_loadings.update_layout(showlegend=not show_sep_legend_load)
                     fig_loadings.update_xaxes(tickangle=45, tickfont=dict(size=9))
