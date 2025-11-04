@@ -335,6 +335,13 @@ if uploaded_file is not None:
         # Prepare X and y
         le_ipls = LabelEncoder()
         y = le_ipls.fit_transform(labels)
+        # Special handling for Sex mode: map to 1=Male, 2=Female
+        if label_mode == "Sex":
+            # Assuming le_ipls classes_ are ['Female', 'Male'] or ['Male', 'Female'], but to be safe
+            if 'Male' in le_ipls.classes_ and 'Female' in le_ipls.classes_:
+                y = np.where(labels == 'Male', 1, 2)
+            else:
+                st.warning("Unexpected labels for Sex mode in iPLS.")
         X = processed_df[data_cols].T.values # samples x variables (wl)
        
         num_unique_y = len(np.unique(y))
