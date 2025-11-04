@@ -228,6 +228,21 @@ if uploaded_file is not None:
             std_val = processed_df[col].std()
             if std_val != 0:
                 processed_df[col] = (processed_df[col] - mean_val) / std_val
+
+    # Handle NaNs and infs after preprocessing
+    st.info("Checking for NaNs/infs and cleaning data...")
+    processed_df_data = processed_df[data_cols]
+    if processed_df_data.isnull().any().any():
+        st.warning("NaNs detected in spectral data. Filling with column means.")
+        processed_df_data = processed_df_data.fillna(processed_df_data.mean())
+        processed_df[data_cols] = processed_df_data
+    processed_df = processed_df.replace([np.inf, -np.inf], np.nan)
+    if processed_df.isnull().any().any():
+        st.warning("Infs converted to NaNs. Filling with column means.")
+        processed_df_data = processed_df[data_cols].fillna(processed_df_data.mean())
+        processed_df[data_cols] = processed_df_data
+    st.success("Data cleaned successfully.")
+
     # Compute labels and consistent colors
     unique_labels = sorted(set(labels))
     if label_mode == "Sex":
@@ -330,26 +345,65 @@ if uploaded_file is not None:
         # Use pre-computed averages and full_x for iPLS plot
         averages_full = averages
         full_x = full_spectral.values
-        # iPLS Parameters in sidebar
+
+        # Define robust RMSE computation function
+        def compute_best_rmse(X_temp, y, kf, max_ncomp, num_unique_y):
+            if X_temp.shape[0] == 0 or X_temp.shape[1] == 0:
+                return np.inf, 1
+            best_rmse_temp = np.inf
+            best_nc_temp = 1
+            n_temp_vars = X_temp.shape[1]
+            for nc in range(1, min(max_ncomp, n_temp_vars, num_unique_y - 1) + 1):
+                rmse_cv = []
+                for train_idx, test_idx in kf.split(X_temp):
+                    X_train, X_test = X_temp[train_idx], X_temp[test_idx]
+                    y_train, y_test = y[train_idx], y[test_idx]
+                    try:
+                        pls = PLSRegression(n_components=nc)
+                        pls.fit(X_train, y_train)
+                        y_pred = pls.predict(X_test)
+                        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+                        rmse_cv.append(rmse)
+                    except Exception as e:
+                        st.warning(f"PLS fit failed for nc={nc} in fold: {str(e)[:50]}...")
+                        continue
+                if rmse_cv:
+                    avg_rmse = np.mean(rmse_cv)
+                    if avg_rmse < best_rmse_temp:
+                        best_rmse_temp = avg_rmse
+                        best_nc_temp = nc
+            return best_rmse_temp, best_nc_temp
+
+        # iPLS Parameters in sidebar with auto-optimize
         with st.sidebar:
             with st.expander("iPLS Parameters", expanded=False):
                 n_vars = X.shape[1]
                 if n_vars == 0:
                     st.error("No variables after preprocessing.")
                     st.stop()
-               
-                n_intervals = st.slider("Number of Intervals", min_value=5, max_value=100, value=min(50, max(10, n_vars // 10)), step=1)
-                interval_size = n_vars // n_intervals
-                max_ncomp = st.slider("Maximum Number of Components", min_value=1, max_value=min(20, n_vars, num_unique_y - 1), value=min(10, n_vars // 10, num_unique_y - 1), step=1)
-                max_iter = st.slider("Maximum Iterations", min_value=1, max_value=100, value=n_intervals, step=1)
-                st.info(f"iPLS Parameters: n_intervals={n_intervals}, max_ncomp={max_ncomp}, max_iter={max_iter}")
+                
+                auto_optimize = st.checkbox("Auto-optimize parameters", value=True)
+                if auto_optimize:
+                    n_intervals_opt = max(10, min(50, n_vars // 10))
+                    max_ncomp_opt = min(10, max(2, n_vars // 20), num_unique_y - 1)
+                    max_iter_opt = min(n_intervals_opt, 20)
+                    st.info(f"Auto-optimized: n_intervals={n_intervals_opt}, max_ncomp={max_ncomp_opt}, max_iter={max_iter_opt}")
+                    n_intervals = n_intervals_opt
+                    max_ncomp = max_ncomp_opt
+                    max_iter = max_iter_opt
+                else:
+                    n_intervals = st.slider("Number of Intervals", min_value=5, max_value=100, value=min(50, max(10, n_vars // 10)), step=1)
+                    max_ncomp = st.slider("Maximum Number of Components", min_value=1, max_value=min(20, n_vars), value=min(10, n_vars // 10), step=1)
+                    max_iter = st.slider("Maximum Iterations", min_value=1, max_value=100, value=n_intervals, step=1)
        
         # Generate intervals
         intervals = []
+        interval_size = n_vars // n_intervals if n_intervals > 0 else n_vars
         for i in range(n_intervals):
             start = i * interval_size
             end = min((i + 1) * interval_size, n_vars)
-            intervals.append((start, end))
+            if start < end:  # Ensure non-empty
+                intervals.append((start, end))
        
         kf = KFold(n_splits=5)
        
@@ -375,24 +429,8 @@ if uploaded_file is not None:
                     if not temp_vars:
                         continue
                     X_temp = X[:, temp_vars]
-                    n_temp_vars = X_temp.shape[1]
                    
-                    best_rmse_temp = np.inf
-                    best_nc_temp = 1
-                    for nc in range(1, min(max_ncomp, n_temp_vars, num_unique_y - 1) + 1):
-                        rmse_cv = []
-                        for train_idx, test_idx in kf.split(X_temp):
-                            X_train, X_test = X_temp[train_idx], X_temp[test_idx]
-                            y_train, y_test = y[train_idx], y[test_idx]
-                            pls = PLSRegression(n_components=nc)
-                            pls.fit(X_train, y_train)
-                            y_pred = pls.predict(X_test)
-                            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-                            rmse_cv.append(rmse)
-                        avg_rmse = np.mean(rmse_cv)
-                        if avg_rmse < best_rmse_temp:
-                            best_rmse_temp = avg_rmse
-                            best_nc_temp = nc
+                    best_rmse_temp, best_nc_temp = compute_best_rmse(X_temp, y, kf, max_ncomp, num_unique_y)
                     candidates_rmse.append(best_rmse_temp)
                     candidates_ncomp.append(best_nc_temp)
                     candidates_int_idx.append(i)
@@ -410,23 +448,7 @@ if uploaded_file is not None:
                     # Compute current best RMSE
                     if current_selected_vars:
                         X_curr = X[:, current_selected_vars]
-                        n_curr_vars = X_curr.shape[1]
-                        best_rmse_curr = np.inf
-                        best_nc_curr = 1
-                        for nc in range(1, min(max_ncomp, n_curr_vars, num_unique_y - 1) + 1):
-                            rmse_cv = []
-                            for train_idx, test_idx in kf.split(X_curr):
-                                X_train, X_test = X_curr[train_idx], X_test[test_idx]
-                                y_train, y_test = y[train_idx], y[test_idx]
-                                pls = PLSRegression(n_components=nc)
-                                pls.fit(X_train, y_train)
-                                y_pred = pls.predict(X_test)
-                                rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-                                rmse_cv.append(rmse)
-                            avg_rmse = np.mean(rmse_cv)
-                            if avg_rmse < best_rmse_curr:
-                                best_rmse_curr = avg_rmse
-                                best_nc_curr = nc
+                        best_rmse_curr, _ = compute_best_rmse(X_curr, y, kf, max_ncomp, num_unique_y)
                         if new_rmse >= best_rmse_curr:
                             improved = False
                             continue
@@ -445,7 +467,7 @@ if uploaded_file is not None:
                
                 st.info(f"Iteration {iteration}/{max_iter}: selected interval {add_int_idx + 1} (RMSECV={new_rmse:.5f}, nLV={candidates_ncomp[best_cand]})")
         except Exception as e:
-            st.error(f"iPLS forward selection failed with parameters n_intervals={n_intervals}, max_ncomp={max_ncomp}, max_iter={max_iter}. Error: {str(e)}")
+            st.error(f"iPLS forward selection failed. Error: {str(e)}")
             selected_intervals = []
             current_selected_vars = []
             rmse_history = []
@@ -456,32 +478,16 @@ if uploaded_file is not None:
         single_ncomp = []
         try:
             for i, (start, end) in enumerate(intervals):
-                X_int = X[:, start:end]
-                n_int_vars = X_int.shape[1]
-                if n_int_vars == 0:
+                if start >= end:
                     single_rmse.append(np.inf)
                     single_ncomp.append(0)
                     continue
-                best_rmse_int = np.inf
-                best_nc_int = 1
-                for nc in range(1, min(max_ncomp, n_int_vars, num_unique_y - 1) + 1):
-                    rmse_cv = []
-                    for train_idx, test_idx in kf.split(X_int):
-                        X_train, X_test = X_int[train_idx], X_test[test_idx]
-                        y_train, y_test = y[train_idx], y[test_idx]
-                        pls = PLSRegression(n_components=nc)
-                        pls.fit(X_train, y_train)
-                        y_pred = pls.predict(X_test)
-                        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-                        rmse_cv.append(rmse)
-                    avg_rmse = np.mean(rmse_cv)
-                    if avg_rmse < best_rmse_int:
-                        best_rmse_int = avg_rmse
-                        best_nc_int = nc
+                X_int = X[:, start:end]
+                best_rmse_int, best_nc_int = compute_best_rmse(X_int, y, kf, max_ncomp, num_unique_y)
                 single_rmse.append(best_rmse_int)
                 single_ncomp.append(best_nc_int)
         except Exception as e:
-            st.error(f"iPLS single interval computation failed with parameters n_intervals={n_intervals}, max_ncomp={max_ncomp}. Error: {str(e)}")
+            st.error(f"iPLS single interval computation failed. Error: {str(e)}")
             single_rmse = [np.inf] * len(intervals)
             single_ncomp = [0] * len(intervals)
        
@@ -489,27 +495,10 @@ if uploaded_file is not None:
         global_rmse = np.inf
         best_nc_global = 1
         try:
-            X_full = X
-            n_full_vars = X_full.shape[1]
-            best_rmse_global = np.inf
-            best_nc_global = 1
-            for nc in range(1, min(max_ncomp, n_full_vars, num_unique_y - 1) + 1):
-                rmse_cv = []
-                for train_idx, test_idx in kf.split(X_full):
-                    X_train, X_test = X_full[train_idx], X_full[test_idx]
-                    y_train, y_test = y[train_idx], y[test_idx]
-                    pls = PLSRegression(n_components=nc)
-                    pls.fit(X_train, y_train)
-                    y_pred = pls.predict(X_test)
-                    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-                    rmse_cv.append(rmse)
-                avg_rmse = np.mean(rmse_cv)
-                if avg_rmse < best_rmse_global:
-                    best_rmse_global = avg_rmse
-                    best_nc_global = nc
+            best_rmse_global, best_nc_global = compute_best_rmse(X, y, kf, max_ncomp, num_unique_y)
             global_rmse = best_rmse_global
         except Exception as e:
-            st.error(f"iPLS global RMSECV computation failed with parameters max_ncomp={max_ncomp}. Error: {str(e)}")
+            st.error(f"iPLS global RMSECV computation failed. Error: {str(e)}")
             global_rmse = np.inf
             best_nc_global = 1
         # Option for separate legends
@@ -519,12 +508,13 @@ if uploaded_file is not None:
         st.subheader("iPLS Interval Selection Plot")
         fig_ipls, ax = plt.subplots(figsize=(12, 6))
        
-        max_rmse_single = max([r for r in single_rmse if r != np.inf])
+        finite_rmses = [r for r in single_rmse if r != np.inf]
+        max_rmse_single = max(finite_rmses) if finite_rmses else 1
         offset = 0.01 * max_rmse_single if max_rmse_single > 0 else 1
         selected_int_indices = [intervals.index(intv) for intv in selected_intervals] if selected_intervals else []
        
         for i, (start, end) in enumerate(intervals):
-            if single_rmse[i] == np.inf:
+            if single_rmse[i] == np.inf or start >= end:
                 continue
             x_start = full_x[start]
             x_end = full_x[end - 1] if end < len(full_x) else full_x[-1]
@@ -590,12 +580,12 @@ if uploaded_file is not None:
        
         # Filter to selected variables (rows)
         if current_selected_vars:
-            current_selected_vars = sorted(current_selected_vars)
+            current_selected_vars = sorted(set(current_selected_vars))  # unique sorted
             processed_df = processed_df.iloc[current_selected_vars].reset_index(drop=True)
         else:
             st.warning("No intervals selected.")
        
-        st.success(f"iPLS selected {len(selected_intervals)} intervals ({len(current_selected_vars)} variables) from {n_intervals} possible.")
+        st.success(f"iPLS selected {len(selected_intervals)} intervals ({len(current_selected_vars)} variables) from {len(intervals)} possible.")
   
     # Button to save the pre-processed data (post-iPLS if applied)
     csv_processed = processed_df.to_csv(index=False).encode('utf-8')
