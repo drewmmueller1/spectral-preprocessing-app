@@ -378,27 +378,16 @@ if uploaded_file is not None:
                         best_nc_temp = nc
             return best_rmse_temp, best_nc_temp
 
-        # iPLS Parameters in sidebar with auto-optimize
+        # iPLS Parameters in sidebar
         with st.sidebar:
             with st.expander("iPLS Parameters", expanded=False):
                 if n_vars == 0:
                     st.error("No variables after preprocessing.")
                     st.stop()
                 
-                auto_optimize = st.checkbox("Auto-optimize parameters", value=True)
-                max_ncomp_default = min(10, n_samples, n_vars, num_unique_y - 1)
-                if auto_optimize:
-                    n_intervals_opt = max(5, min(50, n_vars // 5))  # Adjusted for small n_vars
-                    max_ncomp_opt = min(10, max(2, n_vars // 20, n_samples // 5), num_unique_y - 1)
-                    max_iter_opt = min(n_intervals_opt, max(5, n_samples // 2))
-                    st.info(f"Auto-optimized: n_intervals={n_intervals_opt}, max_ncomp={max_ncomp_opt}, max_iter={max_iter_opt}")
-                    n_intervals = n_intervals_opt
-                    max_ncomp = max_ncomp_opt
-                    max_iter = max_iter_opt
-                else:
-                    n_intervals = st.slider("Number of Intervals", min_value=5, max_value=min(100, n_vars), value=min(50, max(10, n_vars // 10)), step=1)
-                    max_ncomp = st.slider("Maximum Number of Components", min_value=1, max_value=min(20, n_samples, n_vars, num_unique_y - 1), value=min(10, n_samples, n_vars // 10, num_unique_y - 1), step=1)
-                    max_iter = st.slider("Maximum Iterations", min_value=1, max_value=min(100, n_intervals), value=min(n_intervals, max(10, n_samples // 2)), step=1)
+                n_intervals = st.slider("Number of Intervals", min_value=5, max_value=min(100, n_vars), value=max(5, n_vars // 10), step=1)
+                max_ncomp = st.slider("Maximum Number of Components", min_value=1, max_value=min(20, n_samples, n_vars, num_unique_y - 1), value=min(10, n_samples, n_vars // 10, num_unique_y - 1), step=1)
+                max_iter = st.slider("Maximum Iterations", min_value=1, max_value=min(100, n_intervals), value=min(n_intervals, max(10, n_samples // 2)), step=1)
        
         # Generate intervals
         intervals = []
@@ -542,12 +531,10 @@ if uploaded_file is not None:
         prefixes_ipls = list(averages_full.keys())
         for i, prefix in enumerate(averages_full):
             color = label_to_rgb[prefix]
-            ax2.plot(full_x, averages_full[prefix], color=color, alpha=0.7, linewidth=1, label=prefix)
+            ax2.plot(full_x, averages_full[prefix], color=color, alpha=0.7, linewidth=1)
        
         if not show_sep_legend_ipls:
             ax.legend(handles=[green_patch, red_patch], loc='upper right')
-            if len(prefixes_ipls) > 0:
-                ax2.legend(loc='lower right')
        
         plt.title('iPLS Interval Selection (First Iteration)')
         plt.tight_layout()
@@ -559,14 +546,6 @@ if uploaded_file is not None:
             ax_leg_int.axis('off')
             ax_leg_int.legend(handles=[green_patch, red_patch], loc='center')
             st.pyplot(fig_leg_int)
-            # Spectra legend
-            if prefixes_ipls:
-                st.subheader("iPLS Spectra Legend")
-                fig_leg_spec, ax_leg_spec = plt.subplots(figsize=(4, len(prefixes_ipls) * 0.5 + 1))
-                ax_leg_spec.axis('off')
-                legend_elements_spec = [Line2D([0], [0], color=label_to_rgb[prefix], lw=2, label=prefix) for prefix in prefixes_ipls]
-                ax_leg_spec.legend(handles=legend_elements_spec, loc='center')
-                st.pyplot(fig_leg_spec)
        
         # RMSE vs Iterations plot
         if rmse_history:
