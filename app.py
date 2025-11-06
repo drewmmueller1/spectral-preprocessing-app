@@ -123,22 +123,31 @@ if uploaded_file is not None:
         labels = [str(samples_info[col]['age']) if samples_info[col]['age'] >= 0 else "Unknown" for col in data_cols]
    
     if label_mode == "Sex":
-        st.subheader("Label Distribution")
+        st.subheader("Label Distribution (Including Unknown)")
         counts = pd.Series(labels).value_counts()
         fig = px.bar(x=counts.index, y=counts.values, title="Sex Distribution")
         fig.update_layout(xaxis_title="Sex", yaxis_title="Count")
         st.plotly_chart(fig)
-        has_male = "Male" in counts.index
-        has_female = "Female" in counts.index
-        if has_male and has_female:
-            valid_mask = [l != "Unknown" for l in labels]
-            data_cols = [data_cols[i] for i, keep in enumerate(valid_mask) if keep]
-            labels = [labels[i] for i, keep in enumerate(valid_mask) if keep]
-            samples_info = {col: samples_info[col] for col in data_cols}
-            st.subheader("Filtered Sample Information (Excluding Unknown)")
+        
+        # Always filter Unknown for Sex
+        valid_mask = [l != "Unknown" for l in labels]
+        data_cols = [data_cols[i] for i, keep in enumerate(valid_mask) if keep]
+        labels = [labels[i] for i, keep in enumerate(valid_mask) if keep]
+        samples_info = {col: samples_info[col] for col in data_cols}
+        
+        st.subheader("Filtered Sex Distribution (Excluding Unknown)")
+        counts_filtered = pd.Series(labels).value_counts()
+        fig_f = px.bar(x=counts_filtered.index, y=counts_filtered.values, title="Filtered Sex Distribution")
+        fig_f.update_layout(xaxis_title="Sex", yaxis_title="Count")
+        st.plotly_chart(fig_f)
+        
+        unique_sex = set(labels)
+        if len(unique_sex) < 2:
+            st.warning(f"Only {len(unique_sex)} unique sex class after filtering Unknown. iPLS cannot be performed for classification.")
         else:
-            st.info("Not both sexes present. Keeping all samples, with 'Unknown' treated as a separate class if applicable.")
-            st.subheader("Sample Information (All Samples)")
+            st.success(f"Found {len(unique_sex)} sex classes: {', '.join(unique_sex)}")
+        
+        st.subheader("Filtered Sample Information")
         st.dataframe(pd.DataFrame(samples_info).T)
     elif label_mode == "Age":
         st.subheader("Label Distribution")
@@ -361,256 +370,235 @@ if uploaded_file is not None:
        
         num_unique_y = len(np.unique(y))
         if num_unique_y < 2:
-            st.error("iPLS requires at least 2 unique classes in labels.")
-            st.stop()
-       
-        n_samples = X.shape[0]
-        n_vars = X.shape[1]
-        # Use pre-computed averages and full_x for iPLS plot
-        averages_full = averages
-        full_x = full_spectral.values
+            st.warning("iPLS requires at least 2 unique classes in labels. Skipping iPLS.")
+        else:
+            n_samples = X.shape[0]
+            n_vars = X.shape[1]
+            # Use pre-computed averages and full_x for iPLS plot
+            averages_full = averages
+            full_x = full_spectral.values
 
-        # Define robust RMSE computation function
-        def compute_best_rmse(X_temp, y, kf, max_ncomp, num_unique_y):
-            if X_temp.shape[0] == 0 or X_temp.shape[1] == 0:
-                return np.inf, 1
-            n_temp_samples = X_temp.shape[0]
-            n_temp_vars = X_temp.shape[1]
-            best_rmse_temp = np.inf
-            best_nc_temp = 1
-            max_nc_possible = min(max_ncomp, n_temp_samples, n_temp_vars)
-            for nc in range(1, max_nc_possible + 1):
-                rmse_cv = []
-                for train_idx, test_idx in kf.split(X_temp):
-                    X_train, X_test = X_temp[train_idx], X_temp[test_idx]
-                    y_train, y_test = y[train_idx], y[test_idx]
-                    try:
-                        pls = PLSRegression(n_components=nc)
-                        pls.fit(X_train, y_train)
-                        y_pred = pls.predict(X_test)
-                        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-                        rmse_cv.append(rmse)
-                    except Exception as e:
-                        st.warning(f"PLS fit failed for nc={nc} in fold: {str(e)[:50]}...")
-                        continue
-                if rmse_cv:
-                    avg_rmse = np.mean(rmse_cv)
-                    if avg_rmse < best_rmse_temp:
-                        best_rmse_temp = avg_rmse
-                        best_nc_temp = nc
-            return best_rmse_temp, best_nc_temp
-
-        # iPLS Parameters in sidebar
-        with st.sidebar:
-            with st.expander("iPLS Parameters", expanded=False):
-                if n_vars == 0:
-                    st.error("No variables after preprocessing.")
-                    st.stop()
-                
-                n_intervals_max = min(100, n_vars)
-                n_intervals_min = 1
-                n_intervals_value = max(1, n_vars // 10)
-                if n_intervals_max > n_intervals_min:
-                    n_intervals = st.slider("Number of Intervals", min_value=n_intervals_min, max_value=n_intervals_max, value=n_intervals_value, step=1)
-                else:
-                    n_intervals = st.number_input("Number of Intervals", min_value=n_intervals_min, max_value=n_intervals_max, value=n_intervals_value, step=1)
-                
-                max_ncomp_max = min(20, n_samples, n_vars)
-                max_ncomp_min = 1
-                max_ncomp_value = min(10, max_ncomp_max // 2)
-                if max_ncomp_max > max_ncomp_min:
-                    max_ncomp = st.slider("Maximum Number of Components", min_value=max_ncomp_min, max_value=max_ncomp_max, value=max_ncomp_value, step=1)
-                else:
-                    max_ncomp = st.number_input("Maximum Number of Components", min_value=max_ncomp_min, max_value=max_ncomp_max, value=max_ncomp_value, step=1)
-                
-                max_iter_max = min(100, n_intervals)
-                max_iter_min = 1
-                max_iter_value = min(n_intervals, max(1, n_samples // 10))
-                if max_iter_max > max_iter_min:
-                    max_iter = st.slider("Maximum Iterations", min_value=max_iter_min, max_value=max_iter_max, value=max_iter_value, step=1)
-                else:
-                    max_iter = st.number_input("Maximum Iterations", min_value=max_iter_min, max_value=max_iter_max, value=max_iter_value, step=1)
-       
-        # Generate intervals
-        intervals = []
-        interval_size = max(1, n_vars // n_intervals) if n_intervals > 0 else n_vars
-        for i in range(n_intervals):
-            start = i * interval_size
-            end = min((i + 1) * interval_size, n_vars)
-            if start < end:  # Ensure non-empty
-                intervals.append((start, end))
-       
-        kf = KFold(n_splits=min(5, n_samples))  # Adjust folds if few samples
-       
-        # Forward iPLS selection with safeguard
-        selected_intervals = []
-        current_selected_vars = []
-        rmse_history = []
-        best_ncomp_history = []
-        improved = True
-        iteration = 0
-       
-        try:
-            while improved and iteration < max_iter:
-                iteration += 1
-                candidates_rmse = []
-                candidates_ncomp = []
-                candidates_int_idx = []
-               
-                for i, (start, end) in enumerate(intervals):
-                    if (start, end) in selected_intervals:
-                        continue
-                    temp_vars = current_selected_vars + list(range(start, end))
-                    if not temp_vars:
-                        continue
-                    X_temp = X[:, temp_vars]
-                   
-                    best_rmse_temp, best_nc_temp = compute_best_rmse(X_temp, y, kf, max_ncomp, num_unique_y)
-                    candidates_rmse.append(best_rmse_temp)
-                    candidates_ncomp.append(best_nc_temp)
-                    candidates_int_idx.append(i)
-               
-                if not candidates_rmse:
-                    break
-               
-                best_cand = np.argmin(candidates_rmse)
-                new_rmse = candidates_rmse[best_cand]
-               
-                # For first iteration, always add
-                if iteration == 1:
-                    pass
-                else:
-                    # Compute current best RMSE
-                    if current_selected_vars:
-                        X_curr = X[:, current_selected_vars]
-                        best_rmse_curr, _ = compute_best_rmse(X_curr, y, kf, max_ncomp, num_unique_y)
-                        if new_rmse >= best_rmse_curr:
-                            improved = False
+            # Define robust RMSE computation function
+            def compute_best_rmse(X_temp, y, kf, max_ncomp, num_unique_y):
+                if X_temp.shape[0] == 0 or X_temp.shape[1] == 0:
+                    return np.inf, 1
+                n_temp_samples = X_temp.shape[0]
+                n_temp_vars = X_temp.shape[1]
+                best_rmse_temp = np.inf
+                best_nc_temp = 1
+                max_nc_possible = min(max_ncomp, n_temp_samples, n_temp_vars)
+                for nc in range(1, max_nc_possible + 1):
+                    rmse_cv = []
+                    for train_idx, test_idx in kf.split(X_temp):
+                        X_train, X_test = X_temp[train_idx], X_temp[test_idx]
+                        y_train, y_test = y[train_idx], y[test_idx]
+                        try:
+                            pls = PLSRegression(n_components=nc)
+                            pls.fit(X_train, y_train)
+                            y_pred = pls.predict(X_test)
+                            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+                            rmse_cv.append(rmse)
+                        except Exception as e:
+                            st.warning(f"PLS fit failed for nc={nc} in fold: {str(e)[:50]}...")
                             continue
-                    else:
-                        improved = False
-                        continue
-               
-                # Add the best candidate
-                add_int_idx = candidates_int_idx[best_cand]
-                add_int = intervals[add_int_idx]
-                selected_intervals.append(add_int)
-                add_vars = list(range(add_int[0], add_int[1]))
-                current_selected_vars.extend(add_vars)
-                rmse_history.append(new_rmse)
-                best_ncomp_history.append(candidates_ncomp[best_cand])
-               
-                st.info(f"Iteration {iteration}/{max_iter}: selected interval {add_int_idx + 1} (RMSECV={new_rmse:.5f}, nLV={candidates_ncomp[best_cand]})")
-        except Exception as e:
-            st.error(f"iPLS forward selection failed. Error: {str(e)}")
+                    if rmse_cv:
+                        avg_rmse = np.mean(rmse_cv)
+                        if avg_rmse < best_rmse_temp:
+                            best_rmse_temp = avg_rmse
+                            best_nc_temp = nc
+                return best_rmse_temp, best_nc_temp
+
+            # iPLS Parameters in sidebar
+            with st.sidebar:
+                with st.expander("iPLS Parameters", expanded=False):
+                    if n_vars == 0:
+                        st.error("No variables after preprocessing.")
+                        st.stop()
+                    
+                    n_intervals = st.slider("Number of Intervals", min_value=5, max_value=min(100, n_vars), value=max(5, n_vars // 10), step=1)
+                    max_ncomp = st.slider("Maximum Number of Components", min_value=1, max_value=min(20, n_samples, n_vars), value=min(10, n_samples, n_vars // 10), step=1)
+                    max_iter = st.slider("Maximum Iterations", min_value=1, max_value=min(100, n_intervals), value=min(n_intervals, max(10, n_samples // 2)), step=1)
+           
+            # Generate intervals
+            intervals = []
+            interval_size = max(1, n_vars // n_intervals) if n_intervals > 0 else n_vars
+            for i in range(n_intervals):
+                start = i * interval_size
+                end = min((i + 1) * interval_size, n_vars)
+                if start < end:  # Ensure non-empty
+                    intervals.append((start, end))
+           
+            kf = KFold(n_splits=min(5, n_samples))  # Adjust folds if few samples
+           
+            # Forward iPLS selection with safeguard
             selected_intervals = []
             current_selected_vars = []
             rmse_history = []
             best_ncomp_history = []
-       
-        # Compute single interval RMSE and ncomp for plot with safeguard
-        single_rmse = []
-        single_ncomp = []
-        try:
-            for i, (start, end) in enumerate(intervals):
-                if start >= end:
-                    single_rmse.append(np.inf)
-                    single_ncomp.append(0)
-                    continue
-                X_int = X[:, start:end]
-                best_rmse_int, best_nc_int = compute_best_rmse(X_int, y, kf, max_ncomp, num_unique_y)
-                single_rmse.append(best_rmse_int)
-                single_ncomp.append(best_nc_int)
-        except Exception as e:
-            st.error(f"iPLS single interval computation failed. Error: {str(e)}")
-            single_rmse = [np.inf] * len(intervals)
-            single_ncomp = [0] * len(intervals)
-       
-        # Compute global RMSECV with safeguard
-        global_rmse = np.inf
-        best_nc_global = 1
-        try:
-            best_rmse_global, best_nc_global = compute_best_rmse(X, y, kf, max_ncomp, num_unique_y)
-            global_rmse = best_rmse_global
-        except Exception as e:
-            st.error(f"iPLS global RMSECV computation failed. Error: {str(e)}")
+            improved = True
+            iteration = 0
+           
+            try:
+                while improved and iteration < max_iter:
+                    iteration += 1
+                    candidates_rmse = []
+                    candidates_ncomp = []
+                    candidates_int_idx = []
+                   
+                    for i, (start, end) in enumerate(intervals):
+                        if (start, end) in selected_intervals:
+                            continue
+                        temp_vars = current_selected_vars + list(range(start, end))
+                        if not temp_vars:
+                            continue
+                        X_temp = X[:, temp_vars]
+                       
+                        best_rmse_temp, best_nc_temp = compute_best_rmse(X_temp, y, kf, max_ncomp, num_unique_y)
+                        candidates_rmse.append(best_rmse_temp)
+                        candidates_ncomp.append(best_nc_temp)
+                        candidates_int_idx.append(i)
+                   
+                    if not candidates_rmse:
+                        break
+                   
+                    best_cand = np.argmin(candidates_rmse)
+                    new_rmse = candidates_rmse[best_cand]
+                   
+                    # For first iteration, always add
+                    if iteration == 1:
+                        pass
+                    else:
+                        # Compute current best RMSE
+                        if current_selected_vars:
+                            X_curr = X[:, current_selected_vars]
+                            best_rmse_curr, _ = compute_best_rmse(X_curr, y, kf, max_ncomp, num_unique_y)
+                            if new_rmse >= best_rmse_curr:
+                                improved = False
+                                continue
+                        else:
+                            improved = False
+                            continue
+                   
+                    # Add the best candidate
+                    add_int_idx = candidates_int_idx[best_cand]
+                    add_int = intervals[add_int_idx]
+                    selected_intervals.append(add_int)
+                    add_vars = list(range(add_int[0], add_int[1]))
+                    current_selected_vars.extend(add_vars)
+                    rmse_history.append(new_rmse)
+                    best_ncomp_history.append(candidates_ncomp[best_cand])
+                   
+                    st.info(f"Iteration {iteration}/{max_iter}: selected interval {add_int_idx + 1} (RMSECV={new_rmse:.5f}, nLV={candidates_ncomp[best_cand]})")
+            except Exception as e:
+                st.error(f"iPLS forward selection failed. Error: {str(e)}")
+                selected_intervals = []
+                current_selected_vars = []
+                rmse_history = []
+                best_ncomp_history = []
+           
+            # Compute single interval RMSE and ncomp for plot with safeguard
+            single_rmse = []
+            single_ncomp = []
+            try:
+                for i, (start, end) in enumerate(intervals):
+                    if start >= end:
+                        single_rmse.append(np.inf)
+                        single_ncomp.append(0)
+                        continue
+                    X_int = X[:, start:end]
+                    best_rmse_int, best_nc_int = compute_best_rmse(X_int, y, kf, max_ncomp, num_unique_y)
+                    single_rmse.append(best_rmse_int)
+                    single_ncomp.append(best_nc_int)
+            except Exception as e:
+                st.error(f"iPLS single interval computation failed. Error: {str(e)}")
+                single_rmse = [np.inf] * len(intervals)
+                single_ncomp = [0] * len(intervals)
+           
+            # Compute global RMSECV with safeguard
             global_rmse = np.inf
             best_nc_global = 1
-        # Option for separate legends
-        show_sep_legend_ipls = st.checkbox("Show separate legends for iPLS plot", key="sep_ipls")
-       
-        # iPLS Plot: First iteration intervals
-        st.subheader("iPLS Interval Selection Plot")
-        fig_ipls, ax = plt.subplots(figsize=(12, 6))
-       
-        finite_rmses = [r for r in single_rmse if r != np.inf]
-        max_rmse_single = max(finite_rmses) if finite_rmses else 1
-        offset = 0.01 * max_rmse_single if max_rmse_single > 0 else 1
-        selected_int_indices = [intervals.index(intv) for intv in selected_intervals] if selected_intervals else []
-       
-        for i, (start, end) in enumerate(intervals):
-            if single_rmse[i] == np.inf or start >= end:
-                continue
-            x_start = full_x[start]
-            x_end = full_x[end - 1] if end < len(full_x) else full_x[-1]
-            color = 'green' if i in selected_int_indices else 'red'
-            alpha = 0.7 if color == 'green' else 0.5
-            ax.fill_between([x_start, x_end], 0, single_rmse[i], color=color, alpha=alpha)
-            mid_x = (x_start + x_end) / 2
-            ax.text(mid_x, single_rmse[i] + offset, str(single_ncomp[i]), ha='center', va='bottom', fontsize=8)
-       
-        ax.axhline(global_rmse, color='black', linestyle='--', linewidth=2, label=f'Global RMSECV ({best_nc_global} LVs)')
-        ax.set_xlabel(x_label)
-        ax.set_ylabel('RMSECV')
-       
-        # Legend for colors and line
-        green_patch = Patch(facecolor='green', alpha=0.7, label='Selected Intervals')
-        red_patch = Patch(facecolor='red', alpha=0.5, label='Non-selected Intervals')
-       
-        # Twin axis for spectra
-        ax2 = ax.twinx()
-        ax2.set_ylabel(y_label)
-        prefixes_ipls = list(averages_full.keys())
-        for i, prefix in enumerate(averages_full):
-            color = label_to_rgb.get(prefix, (0.5, 0.5, 0.5))
-            ax2.plot(full_x, averages_full[prefix], color=color, alpha=0.7, linewidth=1)
-       
-        if not show_sep_legend_ipls:
-            ax.legend(handles=[green_patch, red_patch], loc='upper right')
-       
-        plt.title('iPLS Interval Selection (First Iteration)')
-        plt.tight_layout()
-        st.pyplot(fig_ipls)
-        if show_sep_legend_ipls:
-            # Interval legend
-            st.subheader("iPLS Interval Legend")
-            fig_leg_int, ax_leg_int = plt.subplots(figsize=(3, 2))
-            ax_leg_int.axis('off')
-            ax_leg_int.legend(handles=[green_patch, red_patch], loc='center')
-            st.pyplot(fig_leg_int)
-       
-        # RMSE vs Iterations plot
-        if rmse_history:
-            st.subheader("iPLS RMSECV vs Iterations")
-            fig_rmse, ax_rmse = plt.subplots(figsize=(8, 5))
-            iters = range(1, len(rmse_history) + 1)
-            ax_rmse.plot(iters, rmse_history, 'bo-', label='Selected Model')
-            ax_rmse.axhline(global_rmse, color='black', ls='--', label='Global Model')
-            ax_rmse.set_xlabel('Iteration')
-            ax_rmse.set_ylabel('RMSECV')
-            ax_rmse.legend()
-            ax_rmse.grid(True, alpha=0.3)
+            try:
+                best_rmse_global, best_nc_global = compute_best_rmse(X, y, kf, max_ncomp, num_unique_y)
+                global_rmse = best_rmse_global
+            except Exception as e:
+                st.error(f"iPLS global RMSECV computation failed. Error: {str(e)}")
+                global_rmse = np.inf
+                best_nc_global = 1
+            # Option for separate legends
+            show_sep_legend_ipls = st.checkbox("Show separate legends for iPLS plot", key="sep_ipls")
+           
+            # iPLS Plot: First iteration intervals
+            st.subheader("iPLS Interval Selection Plot")
+            fig_ipls, ax = plt.subplots(figsize=(12, 6))
+           
+            finite_rmses = [r for r in single_rmse if r != np.inf]
+            max_rmse_single = max(finite_rmses) if finite_rmses else 1
+            offset = 0.01 * max_rmse_single if max_rmse_single > 0 else 1
+            selected_int_indices = [intervals.index(intv) for intv in selected_intervals] if selected_intervals else []
+           
+            for i, (start, end) in enumerate(intervals):
+                if single_rmse[i] == np.inf or start >= end:
+                    continue
+                x_start = full_x[start]
+                x_end = full_x[end - 1] if end < len(full_x) else full_x[-1]
+                color = 'green' if i in selected_int_indices else 'red'
+                alpha = 0.7 if color == 'green' else 0.5
+                ax.fill_between([x_start, x_end], 0, single_rmse[i], color=color, alpha=alpha)
+                mid_x = (x_start + x_end) / 2
+                ax.text(mid_x, single_rmse[i] + offset, str(single_ncomp[i]), ha='center', va='bottom', fontsize=8)
+           
+            ax.axhline(global_rmse, color='black', linestyle='--', linewidth=2, label=f'Global RMSECV ({best_nc_global} LVs)')
+            ax.set_xlabel(x_label)
+            ax.set_ylabel('RMSECV')
+           
+            # Legend for colors and line
+            green_patch = Patch(facecolor='green', alpha=0.7, label='Selected Intervals')
+            red_patch = Patch(facecolor='red', alpha=0.5, label='Non-selected Intervals')
+           
+            # Twin axis for spectra
+            ax2 = ax.twinx()
+            ax2.set_ylabel(y_label)
+            prefixes_ipls = list(averages_full.keys())
+            for i, prefix in enumerate(averages_full):
+                color = label_to_rgb.get(prefix, (0.5, 0.5, 0.5))
+                ax2.plot(full_x, averages_full[prefix], color=color, alpha=0.7, linewidth=1)
+           
+            if not show_sep_legend_ipls:
+                ax.legend(handles=[green_patch, red_patch], loc='upper right')
+           
+            plt.title('iPLS Interval Selection (First Iteration)')
             plt.tight_layout()
-            st.pyplot(fig_rmse)
-       
-        # Filter to selected variables (rows)
-        if current_selected_vars:
-            current_selected_vars = sorted(set(current_selected_vars))  # unique sorted
-            processed_df = processed_df.iloc[current_selected_vars].reset_index(drop=True)
-        else:
-            st.warning("No intervals selected.")
-       
-        st.success(f"iPLS selected {len(selected_intervals)} intervals ({len(current_selected_vars)} variables) from {len(intervals)} possible.")
+            st.pyplot(fig_ipls)
+            if show_sep_legend_ipls:
+                # Interval legend
+                st.subheader("iPLS Interval Legend")
+                fig_leg_int, ax_leg_int = plt.subplots(figsize=(3, 2))
+                ax_leg_int.axis('off')
+                ax_leg_int.legend(handles=[green_patch, red_patch], loc='center')
+                st.pyplot(fig_leg_int)
+           
+            # RMSE vs Iterations plot
+            if rmse_history:
+                st.subheader("iPLS RMSECV vs Iterations")
+                fig_rmse, ax_rmse = plt.subplots(figsize=(8, 5))
+                iters = range(1, len(rmse_history) + 1)
+                ax_rmse.plot(iters, rmse_history, 'bo-', label='Selected Model')
+                ax_rmse.axhline(global_rmse, color='black', ls='--', label='Global Model')
+                ax_rmse.set_xlabel('Iteration')
+                ax_rmse.set_ylabel('RMSECV')
+                ax_rmse.legend()
+                ax_rmse.grid(True, alpha=0.3)
+                plt.tight_layout()
+                st.pyplot(fig_rmse)
+           
+            # Filter to selected variables (rows)
+            if current_selected_vars:
+                current_selected_vars = sorted(set(current_selected_vars))  # unique sorted
+                processed_df = processed_df.iloc[current_selected_vars].reset_index(drop=True)
+            else:
+                st.warning("No intervals selected.")
+           
+            st.success(f"iPLS selected {len(selected_intervals)} intervals ({len(current_selected_vars)} variables) from {len(intervals)} possible.")
   
     # Button to save the pre-processed data (post-iPLS if applied)
     csv_processed = processed_df.to_csv(index=False).encode('utf-8')
