@@ -122,24 +122,36 @@ if uploaded_file is not None:
     elif label_mode == "Age":
         labels = [str(samples_info[col]['age']) if samples_info[col]['age'] >= 0 else "Unknown" for col in data_cols]
    
-    if label_mode in ["Sex", "Age"]:
+    if label_mode == "Sex":
         st.subheader("Label Distribution")
-        if label_mode == "Sex":
-            counts = pd.Series(labels).value_counts()
-            fig = px.bar(x=counts.index, y=counts.values, title="Sex Distribution")
-            fig.update_layout(xaxis_title="Sex", yaxis_title="Count")
-            st.plotly_chart(fig)
-        elif label_mode == "Age":
-            ages = [samples_info[col]['age'] for col in data_cols if samples_info[col]['age'] >= 0]
-            age_dist = pd.Series(0, index=range(101))
-            for age in ages:
-                age_dist[age] += 1
-            fig = px.bar(x=age_dist.index, y=age_dist.values, title="Age Distribution (0-100)")
-            fig.update_layout(xaxis_title="Age", yaxis_title="Count")
-            st.plotly_chart(fig)
-            num_unknown = sum(1 for col in data_cols if samples_info[col]['age'] < 0)
-            if num_unknown > 0:
-                st.info(f"Unknown ages: {num_unknown}")
+        counts = pd.Series(labels).value_counts()
+        fig = px.bar(x=counts.index, y=counts.values, title="Sex Distribution")
+        fig.update_layout(xaxis_title="Sex", yaxis_title="Count")
+        st.plotly_chart(fig)
+        has_male = "Male" in counts.index
+        has_female = "Female" in counts.index
+        if has_male and has_female:
+            valid_mask = [l != "Unknown" for l in labels]
+            data_cols = [data_cols[i] for i, keep in enumerate(valid_mask) if keep]
+            labels = [labels[i] for i, keep in enumerate(valid_mask) if keep]
+            samples_info = {col: samples_info[col] for col in data_cols}
+            st.subheader("Filtered Sample Information (Excluding Unknown)")
+        else:
+            st.info("Not both sexes present. Keeping all samples, with 'Unknown' treated as a separate class if applicable.")
+            st.subheader("Sample Information (All Samples)")
+        st.dataframe(pd.DataFrame(samples_info).T)
+    elif label_mode == "Age":
+        st.subheader("Label Distribution")
+        ages = [samples_info[col]['age'] for col in data_cols if samples_info[col]['age'] >= 0]
+        age_dist = pd.Series(0, index=range(101))
+        for age in ages:
+            age_dist[age] += 1
+        fig = px.bar(x=age_dist.index, y=age_dist.values, title="Age Distribution (0-100)")
+        fig.update_layout(xaxis_title="Age", yaxis_title="Count")
+        st.plotly_chart(fig)
+        num_unknown = sum(1 for col in data_cols if samples_info[col]['age'] < 0)
+        if num_unknown > 0:
+            st.info(f"Unknown ages: {num_unknown}")
         
         # Filter out Unknown labels for further analysis
         valid_mask = [l != "Unknown" for l in labels]
@@ -250,7 +262,10 @@ if uploaded_file is not None:
             "Male": (1.0, 0.0, 0.0),  # Red
             "Female": (0.0, 0.0, 1.0)  # Blue
         }
-        color_discrete_map = {label: mcolors.to_hex(rgb) for label, rgb in label_to_rgb.items()}
+        # Handle Unknown if present
+        if "Unknown" in unique_labels:
+            label_to_rgb["Unknown"] = (0.5, 0.5, 0.5)  # Gray
+        color_discrete_map = {label: mcolors.to_hex(rgb) for label, rgb in label_to_rgb.items() if label in unique_labels}
     else:
         n_colors = len(unique_labels)
         wl_range = np.linspace(380, 750, n_colors)
@@ -276,7 +291,7 @@ if uploaded_file is not None:
     st.subheader("All Processed Spectra")
     fig1, ax1 = plt.subplots(figsize=(12, 6))
     for prefix, cols in sample_groups.items():
-        color = label_to_rgb[prefix]
+        color = label_to_rgb.get(prefix, (0.5, 0.5, 0.5))
         alpha_line = 0.5 if len(cols) > 1 else 1.0
         for col in cols:
             ax1.plot(processed_df[spectral_col], processed_df[col], color=color, alpha=alpha_line)
@@ -293,7 +308,7 @@ if uploaded_file is not None:
         y_pos = np.linspace(0.9, 0.1, len(data_cols))
         for i, col in enumerate(data_cols):
             prefix = labels[i]
-            color = label_to_rgb[prefix]
+            color = label_to_rgb.get(prefix, (0.5, 0.5, 0.5))
             ax_samp.text(0.05, y_pos[i], col, transform=ax_samp.transAxes, va='center', fontsize=max(8, 100 / len(data_cols)), color=color)
         st.pyplot(fig_samp)
    
@@ -310,7 +325,7 @@ if uploaded_file is not None:
     num_groups = len(prefixes)
     for i, prefix in enumerate(prefixes):
         avg = averages[prefix]
-        color = label_to_rgb[prefix]
+        color = label_to_rgb.get(prefix, (0.5, 0.5, 0.5))
         ax2.plot(full_spectral, avg, color=color, label=f'{prefix} Average', linewidth=2)
     ax2.set_xlabel(x_label)
     ax2.set_ylabel(y_label)
@@ -324,7 +339,7 @@ if uploaded_file is not None:
         st.subheader("Legend for Averaged Spectra")
         fig_leg, ax_leg = plt.subplots(figsize=(4, num_groups * 0.5 + 1))
         ax_leg.axis('off')
-        legend_elements = [Line2D([0], [0], color=label_to_rgb[prefix], lw=2, label=f'{prefix} Average') for prefix in prefixes]
+        legend_elements = [Line2D([0], [0], color=label_to_rgb.get(prefix, (0.5, 0.5, 0.5)), lw=2, label=f'{prefix} Average') for prefix in prefixes]
         ax_leg.legend(handles=legend_elements, loc='center')
         st.pyplot(fig_leg)
    
@@ -335,13 +350,6 @@ if uploaded_file is not None:
         # Prepare X and y
         le_ipls = LabelEncoder()
         y = le_ipls.fit_transform(labels)
-        # Special handling for Sex mode: map to 1=Male, 2=Female
-        if label_mode == "Sex":
-            # Assuming le_ipls classes_ are ['Female', 'Male'] or ['Male', 'Female'], but to be safe
-            if 'Male' in le_ipls.classes_ and 'Female' in le_ipls.classes_:
-                y = np.where(labels == 'Male', 1, 2)
-            else:
-                st.warning("Unexpected labels for Sex mode in iPLS.")
         X = processed_df[data_cols].T.values # samples x variables (wl)
        
         num_unique_y = len(np.unique(y))
@@ -537,7 +545,7 @@ if uploaded_file is not None:
         ax2.set_ylabel(y_label)
         prefixes_ipls = list(averages_full.keys())
         for i, prefix in enumerate(averages_full):
-            color = label_to_rgb[prefix]
+            color = label_to_rgb.get(prefix, (0.5, 0.5, 0.5))
             ax2.plot(full_x, averages_full[prefix], color=color, alpha=0.7, linewidth=1)
        
         if not show_sep_legend_ipls:
@@ -644,7 +652,7 @@ if uploaded_file is not None:
             # Matplotlib for static plot
             fig, ax = plt.subplots(figsize=(8, 6))
             unique_labels_pca = df_plot_2d['label'].unique()
-            color_map_pca = {label: label_to_rgb[label] for label in unique_labels_pca}
+            color_map_pca = {label: label_to_rgb.get(label, (0.5, 0.5, 0.5)) for label in unique_labels_pca}
           
             for label in unique_labels_pca:
                 mask = df_plot_2d['label'] == label
@@ -693,7 +701,7 @@ if uploaded_file is not None:
             if show_sep_legend_pca3d:
                 st.subheader("3D PCA Legend")
                 unique_l = df_plot['label'].unique()
-                colors_leg = [color_discrete_map[label] for label in unique_l]
+                colors_leg = [color_discrete_map.get(label, '#808080') for label in unique_l]
                 fig_leg3d = go.Figure()
                 for i, label in enumerate(unique_l):
                     fig_leg3d.add_trace(go.Scatter3d(x=[None], y=[None], z=[None], mode='markers', marker=dict(color=colors_leg[i], size=10), name=label))
