@@ -350,6 +350,13 @@ if uploaded_file is not None:
         # Prepare X and y
         le_ipls = LabelEncoder()
         y = le_ipls.fit_transform(labels)
+        # Special handling for Sex mode: map to 1=Male, 2=Female
+        if label_mode == "Sex":
+            # Assuming le_ipls classes_ are ['Female', 'Male'] or ['Male', 'Female'], but to be safe
+            if 'Male' in le_ipls.classes_ and 'Female' in le_ipls.classes_:
+                y = np.where(labels == 'Male', 1, 2)
+            else:
+                st.warning("Unexpected labels for Sex mode in iPLS.")
         X = processed_df[data_cols].T.values # samples x variables (wl)
        
         num_unique_y = len(np.unique(y))
@@ -371,7 +378,7 @@ if uploaded_file is not None:
             n_temp_vars = X_temp.shape[1]
             best_rmse_temp = np.inf
             best_nc_temp = 1
-            max_nc_possible = min(max_ncomp, n_temp_samples, n_temp_vars, num_unique_y - 1)
+            max_nc_possible = min(max_ncomp, n_temp_samples, n_temp_vars)
             for nc in range(1, max_nc_possible + 1):
                 rmse_cv = []
                 for train_idx, test_idx in kf.split(X_temp):
@@ -400,9 +407,29 @@ if uploaded_file is not None:
                     st.error("No variables after preprocessing.")
                     st.stop()
                 
-                n_intervals = st.slider("Number of Intervals", min_value=5, max_value=min(100, n_vars), value=max(5, n_vars // 10), step=1)
-                max_ncomp = st.slider("Maximum Number of Components", min_value=1, max_value=min(20, n_samples, n_vars, num_unique_y - 1), value=min(10, n_samples, n_vars // 10, num_unique_y - 1), step=1)
-                max_iter = st.slider("Maximum Iterations", min_value=1, max_value=min(100, n_intervals), value=min(n_intervals, max(10, n_samples // 2)), step=1)
+                n_intervals_max = min(100, n_vars)
+                n_intervals_min = 1
+                n_intervals_value = max(1, n_vars // 10)
+                if n_intervals_max > n_intervals_min:
+                    n_intervals = st.slider("Number of Intervals", min_value=n_intervals_min, max_value=n_intervals_max, value=n_intervals_value, step=1)
+                else:
+                    n_intervals = st.number_input("Number of Intervals", min_value=n_intervals_min, max_value=n_intervals_max, value=n_intervals_value, step=1)
+                
+                max_ncomp_max = min(20, n_samples, n_vars)
+                max_ncomp_min = 1
+                max_ncomp_value = min(10, max_ncomp_max // 2)
+                if max_ncomp_max > max_ncomp_min:
+                    max_ncomp = st.slider("Maximum Number of Components", min_value=max_ncomp_min, max_value=max_ncomp_max, value=max_ncomp_value, step=1)
+                else:
+                    max_ncomp = st.number_input("Maximum Number of Components", min_value=max_ncomp_min, max_value=max_ncomp_max, value=max_ncomp_value, step=1)
+                
+                max_iter_max = min(100, n_intervals)
+                max_iter_min = 1
+                max_iter_value = min(n_intervals, max(1, n_samples // 10))
+                if max_iter_max > max_iter_min:
+                    max_iter = st.slider("Maximum Iterations", min_value=max_iter_min, max_value=max_iter_max, value=max_iter_value, step=1)
+                else:
+                    max_iter = st.number_input("Maximum Iterations", min_value=max_iter_min, max_value=max_iter_max, value=max_iter_value, step=1)
        
         # Generate intervals
         intervals = []
