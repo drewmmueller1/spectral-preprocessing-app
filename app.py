@@ -71,8 +71,13 @@ def load_and_preprocess_data(uploaded_file, spectrum_type, do_normalize, do_zsco
     Cached preprocessing pipeline.
     Returns: processed_df, labels, samples_info, full_spectral, averages, current_selected_vars, x_label, y_label, loadings_x_label, ipls_artifacts
     """
-    # Read the CSV
-    df = pd.read_csv(uploaded_file)
+    # Read the CSV with error handling
+    try:
+        df = pd.read_csv(uploaded_file)
+    except pd.errors.EmptyDataError:
+        raise ValueError("The uploaded file is empty or contains no data.")
+    except Exception as e:
+        raise ValueError(f"Error reading CSV file: {str(e)}. Please ensure it's a valid CSV with headers and data.")
   
     if len(df.columns) < 2:
         raise ValueError("CSV must have at least 2 columns: spectral axis and data.")
@@ -378,8 +383,29 @@ if uploaded_file:
 if st.session_state.uploaded_file is not None:
     uploaded_file = st.session_state.uploaded_file
     
-    # Quick read for display
-    df_temp = pd.read_csv(uploaded_file)
+    # Check file size
+    uploaded_file.seek(0)
+    file_size = len(uploaded_file.read())
+    uploaded_file.seek(0)
+    if file_size == 0:
+        st.error("The uploaded file is empty. Please upload a valid CSV file with data (at least headers and one row).")
+        st.stop()
+    
+    # Quick read for display with error handling
+    try:
+        df_temp = pd.read_csv(uploaded_file)
+        uploaded_file.seek(0)  # Reset for later use
+    except pd.errors.EmptyDataError:
+        st.error("The uploaded file contains no data. Please ensure your CSV has headers and at least one row of data.")
+        st.stop()
+    except Exception as e:
+        st.error(f"Error reading the CSV file for preview: {str(e)}. Please check the file format and try again.")
+        st.stop()
+    
+    if len(df_temp.columns) < 2:
+        st.error("The CSV must have at least 2 columns: one for the spectral axis and at least one for sample data.")
+        st.stop()
+    
     spectral_col_temp = df_temp.columns[0]
     data_cols_temp = df_temp.columns[1:]
     
