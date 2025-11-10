@@ -20,7 +20,6 @@ import matplotlib.colors as mcolors
 from mlxtend.plotting import plot_decision_regions
 from scipy.signal import savgol_filter
 import seaborn as sns
-from streamlit import caching
 
 def wavelength_to_rgb(wavelength, gamma=0.8):
     '''This converts a given wavelength of light to an
@@ -70,7 +69,7 @@ def wavelength_to_rgb(wavelength, gamma=0.8):
 def load_and_preprocess_data(uploaded_file, spectrum_type, do_normalize, do_zscore, do_smooth, window_length, polyorder, deriv, do_snv, do_ipls, n_intervals, max_ncomp, max_iter, label_mode, custom_x_label, custom_y_label, custom_loadings_x_label):
     """
     Cached preprocessing pipeline.
-    Returns: processed_df, labels, samples_info, full_spectral, averages, current_selected_vars, x_label, y_label, loadings_x_label
+    Returns: processed_df, labels, samples_info, full_spectral, averages, current_selected_vars, x_label, y_label, loadings_x_label, ipls_artifacts
     """
     # Read the CSV
     df = pd.read_csv(uploaded_file)
@@ -181,6 +180,7 @@ def load_and_preprocess_data(uploaded_file, spectrum_type, do_normalize, do_zsco
 
     # iPLS if enabled
     current_selected_vars = []
+    ipls_artifacts = None
     if do_ipls:
         le_ipls = LabelEncoder()
         y = le_ipls.fit_transform(labels)
@@ -240,6 +240,7 @@ def load_and_preprocess_data(uploaded_file, spectrum_type, do_normalize, do_zsco
             # Forward iPLS selection
             selected_intervals = []
             current_selected_vars = []
+            rmse_history = []
             improved = True
             iteration = 0
            
@@ -284,6 +285,7 @@ def load_and_preprocess_data(uploaded_file, spectrum_type, do_normalize, do_zsco
                 selected_intervals.append(add_int)
                 add_vars = list(range(add_int[0], add_int[1]))
                 current_selected_vars.extend(add_vars)
+                rmse_history.append(new_rmse)
            
             # Compute single interval RMSE and ncomp
             single_rmse = []
@@ -311,12 +313,8 @@ def load_and_preprocess_data(uploaded_file, spectrum_type, do_normalize, do_zsco
             if current_selected_vars:
                 current_selected_vars = sorted(set(current_selected_vars))
                 processed_df = processed_df.iloc[current_selected_vars].reset_index(drop=True)
-            else:
-                current_selected_vars = []
            
-            # For plotting, we need to return also single_rmse, single_ncomp, global_rmse, best_nc_global, intervals, full_x for iPLS plot
-            # But since plots are outside, we'll compute them outside if needed, or return more
-            # For now, return current_selected_vars as is; plots will recompute if needed (but to optimize, return all iPLS artifacts)
+            # iPLS artifacts
             ipls_artifacts = {
                 'single_rmse': single_rmse,
                 'single_ncomp': single_ncomp,
@@ -324,10 +322,10 @@ def load_and_preprocess_data(uploaded_file, spectrum_type, do_normalize, do_zsco
                 'best_nc_global': best_nc_global,
                 'intervals': intervals,
                 'full_x': full_spectral.values,
-                'averages_full': averages
+                'averages_full': averages,
+                'selected_intervals': selected_intervals,
+                'rmse_history': rmse_history
             }
-    else:
-        ipls_artifacts = None
    
     return (processed_df, labels, samples_info, full_spectral, averages, current_selected_vars, 
             x_label, y_label, loadings_x_label, ipls_artifacts)
@@ -503,9 +501,10 @@ if st.session_state.uploaded_file is not None:
     # Clear cache button
     with st.sidebar:
         if st.button("Clear Cache"):
-            caching.clear_cache()
+            st.cache_data.clear()
+            st.cache_resource.clear()
             st.success("Cache cleared! Rerun preprocessing.")
-            st.experimental_rerun()
+            st.rerun()
    
     # Call cached preprocessing
     try:
@@ -617,6 +616,8 @@ if st.session_state.uploaded_file is not None:
         intervals = ipls_artifacts['intervals']
         full_x = ipls_artifacts['full_x']
         averages_full = ipls_artifacts['averages_full']
+        selected_intervals = ipls_artifacts['selected_intervals']
+        rmse_history = ipls_artifacts['rmse_history']
        
         # Option for separate legends
         show_sep_legend_ipls = st.checkbox("Show separate legends for iPLS plot", key="sep_ipls")
@@ -628,15 +629,14 @@ if st.session_state.uploaded_file is not None:
         finite_rmses = [r for r in single_rmse if r != np.inf]
         max_rmse_single = max(finite_rmses) if finite_rmses else 1
         offset = 0.01 * max_rmse_single if max_rmse_single > 0 else 1
-        selected_int_indices = [intervals.index(intv) for intv in selected_intervals] if 'selected_intervals' in locals() else []  # Note: selected_intervals not returned, but can recompute or skip
-        # For simplicity, assume selected are those with low RMSE; in full impl, return selected_intervals too
-        # Placeholder: use green for low RMSE intervals
+        selected_int_indices = [intervals.index(intv) for intv in selected_intervals]
+       
         for i, (start, end) in enumerate(intervals):
             if single_rmse[i] == np.inf or start >= end:
                 continue
             x_start = full_x[start]
             x_end = full_x[end - 1] if end < len(full_x) else full_x[-1]
-            color = 'green' if single_rmse[i] < global_rmse else 'red'
+            color = 'green' if i in selected_int_indices else 'red'
             alpha = 0.7 if color == 'green' else 0.5
             ax.fill_between([x_start, x_end], 0, single_rmse[i], color=color, alpha=alpha)
             mid_x = (x_start + x_end) / 2
@@ -671,7 +671,21 @@ if st.session_state.uploaded_file is not None:
             ax_leg_int.legend(handles=[green_patch, red_patch], loc='center')
             st.pyplot(fig_leg_int)
        
-        st.success(f"iPLS selected {len(current_selected_vars)} variables from {len(intervals)} possible.")
+        # RMSE vs Iterations plot
+        if rmse_history:
+            st.subheader("iPLS RMSECV vs Iterations")
+            fig_rmse, ax_rmse = plt.subplots(figsize=(8, 5))
+            iters = range(1, len(rmse_history) + 1)
+            ax_rmse.plot(iters, rmse_history, 'bo-', label='Selected Model')
+            ax_rmse.axhline(global_rmse, color='black', ls='--', label='Global Model')
+            ax_rmse.set_xlabel('Iteration')
+            ax_rmse.set_ylabel('RMSECV')
+            ax_rmse.legend()
+            ax_rmse.grid(True, alpha=0.3)
+            plt.tight_layout()
+            st.pyplot(fig_rmse)
+       
+        st.success(f"iPLS selected {len(selected_intervals)} intervals ({len(current_selected_vars)} variables) from {len(intervals)} possible.")
   
     # Button to save the pre-processed data
     csv_processed = processed_df.to_csv(index=False).encode('utf-8')
