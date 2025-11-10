@@ -118,9 +118,13 @@ def load_and_preprocess_data(uploaded_file, spectrum_type, do_normalize, do_zsco
         data_cols = [data_cols[i] for i, keep in enumerate(valid_mask) if keep]
         labels = [labels[i] for i, keep in enumerate(valid_mask) if keep]
         samples_info = {col: samples_info[col] for col in data_cols}
+        # Crucial: Update processed_df to only include filtered columns
+        df = df[[spectral_col] + data_cols]
+        processed_df = df.copy()
+    else:
+        processed_df = df.copy()
    
     # Apply filtering based on type
-    processed_df = df.copy()
     if spectrum_type == "MSP Spectra":
         processed_df = processed_df[processed_df[spectral_col] >= 300]
     elif spectrum_type == "FTIR Spectra":
